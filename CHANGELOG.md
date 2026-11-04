@@ -15,6 +15,12 @@ release page shows each platform under its own heading once that platform's file
 (`scripts/update-release-page.sh`, run by the Windows release workflow), followed by a
 downloads table. Under a platform heading, don't start bullets with "Windows:" again.
 
+## 0.11.3
+
+### All platforms
+
+- **Usage bars no longer credit OpenClicky for earlier use.** What was already on a Claude bar when OpenClicky first used it stays out of OpenClicky's share, so a fresh install doesn't claim usage from before it was there.
+
 ## 0.11.2
 
 ### All platforms
