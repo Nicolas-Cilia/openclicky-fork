@@ -52,7 +52,7 @@ enum SettingsLayout {
         Group(page: .clicky, title: "Hands-free", itemIDs: [
             "clicky.fastVoice", "clicky.realtimeProvider", "clicky.fastVoiceNeedsKey", "clicky.alwaysListening",
         ]),
-        Group(page: .clicky, title: "Pointer", itemIDs: ["clicky.pointer"]),
+        Group(page: .clicky, title: "Pointer", itemIDs: ["clicky.pointer", "clicky.guidesWaitForContinue"]),
         Group(page: .clicky, title: "More", isAdvanced: true, itemIDs: [
             "keyboard.type", "keyboard.handsFree", "clicky.model", "clicky.onThisMac", "clicky.emailApp", "clicky.emailNeverSent",
             "plugins.teacher", "clicky.agentMode", "clicky.workspace",

@@ -33,6 +33,13 @@ extension SettingsCatalog {
                 keywords: ["apple intelligence", "on device", "local", "private", "offline", "this mac", "credits", "quick actions", "open app", "volume", "rewrite"],
                 view: AnyView(OnThisMacRow(settings: settings))),
             SettingsItem(
+                id: "clicky.guidesWaitForContinue",
+                title: "Wait for me to say continue", detail: "In step-by-step help, hold ⌃⌥ and say “continue” to move on. Clicks don’t.",
+                keywords: ["guide", "steps", "step by step", "continue", "next", "click", "wait", "pace", "tutorial"],
+                view: AnyView(SettingsRow(title: "Wait for me to say continue", detail: "In step-by-step help, hold ⌃⌥ and say “continue” to move on. Clicks don’t.") {
+                    SettingsToggle(settings: settings, keyPath: \.guidesWaitForSpokenContinue)
+                })),
+            SettingsItem(
                 id: "clicky.pointer",
                 title: "Show the pointer", detail: "It flies to what Clicky means.",
                 keywords: ["pointer", "cursor", "buddy", "orange", "visible", "hide", "always", "while the mouse moves", "after a shake", "shake", "while i talk"],

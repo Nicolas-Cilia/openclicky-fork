@@ -20,6 +20,12 @@
 //  are never seen by a global monitor, which is what we want. Esc, a new question, the island's
 //  stop button, two minutes of nothing, or the step limit end the guide.
 //
+//  "Wait for me to say continue" (Settings → Clicky → Pointer, `guidesWaitForSpokenContinue`, on
+//  by default) changes what finishes a step: clicks, Return and Tab no longer move the guide on. The
+//  person does the step at their own pace, then holds ⌃⌥ and says "continue" (or "next", "done",
+//  `GuidedStepContinuePhrase`). The watcher still remembers the last click, so the off-target check
+//  works the same way, Esc still ends the guide, and it waits ten minutes instead of two.
+//
 
 import AppKit
 import Foundation
@@ -39,6 +45,35 @@ enum GuidedStepMarker {
     static func removingMarkers(from text: String) -> String {
         text.replacingOccurrences(of: markerPattern, with: "", options: [.regularExpression, .caseInsensitive])
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Whether what the person said while a guide waits means "i did that step, go on". Only short
+/// utterances count, so a real question that happens to contain "next" ("what's the next tab
+/// over?") is still a new question.
+enum GuidedStepContinuePhrase {
+    /// Spoken politeness and filler around the phrase, dropped before matching ("ok continue please").
+    private static let fillerWords: Set<String> = ["ok", "okay", "alright", "all", "right", "please", "clicky", "so", "um", "uh", "now", "and"]
+
+    /// What is left once the filler is gone, as whole phrases.
+    private static let continuePhrases: Set<String> = [
+        "continue", "next", "next step", "go on", "go ahead", "keep going", "carry on", "move on",
+        "done", "i'm done", "im done", "i am done", "did it", "i did it", "i did that", "got it",
+        "ready", "i'm ready", "im ready", "i am ready", "what's next", "whats next", "what next",
+        "what now", "then what", "let's continue", "lets continue", "continue please",
+    ]
+
+    /// Longer than this (after the filler is dropped) is never a continue phrase.
+    static let maximumWordCount = 4
+
+    static func isContinue(_ transcript: String) -> Bool {
+        let lowercasedTranscript = transcript.lowercased().replacingOccurrences(of: "’", with: "'")
+        let wordsWithoutPunctuation = lowercasedTranscript
+            .components(separatedBy: CharacterSet.letters.union(CharacterSet(charactersIn: "'")).inverted)
+            .filter { !$0.isEmpty }
+        let meaningfulWords = wordsWithoutPunctuation.filter { !fillerWords.contains($0) }
+        guard !meaningfulWords.isEmpty, meaningfulWords.count <= maximumWordCount else { return false }
+        return continuePhrases.contains(meaningfulWords.joined(separator: " "))
     }
 }
 
@@ -71,10 +106,18 @@ struct GuidedStepRules {
     static let settleSecondsWhileTyping: TimeInterval = 4
     /// No click or Return for this long and the guide is over (they gave up or went elsewhere).
     static let idleSecondsBeforeGivingUp: TimeInterval = 120
+    /// When the guide waits for a spoken "continue", the person is taking their time on purpose:
+    /// reading, thinking, doing the step slowly. Give up only after this long.
+    static let idleSecondsBeforeGivingUpWhileWaitingForContinue: TimeInterval = 600
     /// A runaway guide (a model that always says there is more) stops here.
     static let maximumSteps = 15
 
-    static func reaction(to input: GuidedStepInput, askIsPending: Bool) -> GuidedStepReaction {
+    /// `advancesOnlyWhenTold`: the guide moves on only when the person says "continue", so no click
+    /// or key finishes a step; Esc still ends the guide.
+    static func reaction(to input: GuidedStepInput, askIsPending: Bool, advancesOnlyWhenTold: Bool = false) -> GuidedStepReaction {
+        if advancesOnlyWhenTold {
+            return input == .escapeKey ? .endGuide : .ignore
+        }
         switch input {
         case .click:
             return .askForNextStep(settleSeconds: settleSecondsAfterClick)
@@ -148,14 +191,21 @@ final class GuidedStepWatcher {
     private var pendingAsk: Task<Void, Never>?
     private var idleTimeout: Task<Void, Never>?
     /// The last click while this step waited; Return or Tab after it clears it (no position).
-    private var lastClickLocation: CGPoint?
+    private(set) var lastClickLocation: CGPoint?
+    /// The step is finished by a spoken "continue", never by a click or a key (see the file header).
+    /// The watcher then only remembers the last click and listens for Esc.
+    let advancesOnlyWhenTold: Bool
 
-    init(onStepDone: @escaping (CGPoint?) -> Void, onEnded: @escaping (EndReason) -> Void) {
+    init(advancesOnlyWhenTold: Bool = false, onStepDone: @escaping (CGPoint?) -> Void, onEnded: @escaping (EndReason) -> Void) {
+        self.advancesOnlyWhenTold = advancesOnlyWhenTold
         self.onStepDone = onStepDone
         self.onEnded = onEnded
     }
 
     func start() {
+        let idleSecondsBeforeGivingUp = advancesOnlyWhenTold
+            ? GuidedStepRules.idleSecondsBeforeGivingUpWhileWaitingForContinue
+            : GuidedStepRules.idleSecondsBeforeGivingUp
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp, .rightMouseUp, .keyDown]) { [weak self] event in
             let input = Self.input(for: event)
             // A global monitor's event has no window, so its location is already on the screen.
@@ -163,7 +213,7 @@ final class GuidedStepWatcher {
             Task { @MainActor in self?.handle(input, clickLocation: clickLocation) }
         }
         idleTimeout = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(GuidedStepRules.idleSecondsBeforeGivingUp))
+            try? await Task.sleep(for: .seconds(idleSecondsBeforeGivingUp))
             guard !Task.isCancelled else { return }
             self?.finish(reportingEnd: .gaveUp)
         }
@@ -197,7 +247,7 @@ final class GuidedStepWatcher {
         case .stepKey: lastClickLocation = nil
         case .escapeKey, .otherKey: break
         }
-        switch GuidedStepRules.reaction(to: input, askIsPending: pendingAsk != nil) {
+        switch GuidedStepRules.reaction(to: input, askIsPending: pendingAsk != nil, advancesOnlyWhenTold: advancesOnlyWhenTold) {
         case .askForNextStep(let settleSeconds), .postponePendingAsk(let settleSeconds):
             // Another click or key restarts the wait, so a double click or a quick second click
             // (a menu, then its item) is one step.

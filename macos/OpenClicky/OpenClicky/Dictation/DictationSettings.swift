@@ -273,6 +273,7 @@ final class DictationSettings: ObservableObject {
         readNearbyText = defaults.object(forKey: Keys.readNearbyText) == nil ? true : defaults.bool(forKey: Keys.readNearbyText)
         pauseBeforeSendingScreen = defaults.object(forKey: Keys.pauseBeforeSendingScreen) == nil ? true : defaults.bool(forKey: Keys.pauseBeforeSendingScreen)
         answerSimpleRequestsOnThisMac = defaults.object(forKey: Keys.answerSimpleRequestsOnThisMac) == nil ? true : defaults.bool(forKey: Keys.answerSimpleRequestsOnThisMac)
+        guidesWaitForSpokenContinue = defaults.object(forKey: Keys.guidesWaitForSpokenContinue) == nil ? true : defaults.bool(forKey: Keys.guidesWaitForSpokenContinue)
         hasCompletedDictationOnboarding = defaults.bool(forKey: Keys.hasCompletedDictationOnboarding)
         preferredMicrophoneUID = defaults.string(forKey: Keys.preferredMicrophoneUID)
         orbPosition = Self.decodePoint(defaults.string(forKey: Keys.orbPosition))
@@ -311,6 +312,7 @@ final class DictationSettings: ObservableObject {
         static let readNearbyText = "dictation.readNearbyText"
         static let pauseBeforeSendingScreen = "openclicky.ask.pauseBeforeSendingScreen"
         static let answerSimpleRequestsOnThisMac = "openclicky.ask.onThisMac"
+        static let guidesWaitForSpokenContinue = "openclicky.ask.guidesWaitForSpokenContinue"
         static let hasCompletedDictationOnboarding = "dictation.onboarded"
         static let preferredMicrophoneUID = "dictation.preferredMicrophoneUID"
     }
@@ -433,6 +435,10 @@ final class DictationSettings: ObservableObject {
     /// read, so those never send a screenshot or spend answer credits. English, macOS 26 with
     /// Apple Intelligence on; elsewhere the switch does nothing. On by default.
     @Published var answerSimpleRequestsOnThisMac: Bool { didSet { defaults.set(answerSimpleRequestsOnThisMac, forKey: Keys.answerSimpleRequestsOnThisMac) } }
+    /// A step-by-step guide moves on only when the person holds ⌃⌥ and says "continue", never on a
+    /// click, so they can finish a step at their own pace (`GuidedStepWatcher.advancesOnlyWhenTold`).
+    /// The ⌃⌥ lane only; on by default.
+    @Published var guidesWaitForSpokenContinue: Bool { didSet { defaults.set(guidesWaitForSpokenContinue, forKey: Keys.guidesWaitForSpokenContinue) } }
     @Published var hasCompletedDictationOnboarding: Bool { didSet { defaults.set(hasCompletedDictationOnboarding, forKey: Keys.hasCompletedDictationOnboarding) } }
 
     /// Settings → general → reset, and the orb page's reset: back to a fresh install's values.

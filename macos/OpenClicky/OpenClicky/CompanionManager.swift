@@ -37,7 +37,8 @@ final class CompanionManager: ObservableObject {
         didSet {
             // A guide whose next step never came (the request failed or was cancelled) is over:
             // nothing is being said or fetched and no step waits, so the stop strip must not stay.
-            if voiceState == .idle && guidedStepWatcher == nil && guideStepUnderWay != nil {
+            // One that waits for a spoken "continue" is still under way, watcher or not.
+            if voiceState == .idle && guidedStepWatcher == nil && guideStepUnderWay != nil && !guideWaitsForSpokenContinue {
                 guideStepUnderWay = nil
             }
         }
@@ -660,8 +661,14 @@ final class CompanionManager: ObservableObject {
     /// replaces it, while the island's stop button only silences the voice and leaves the agent
     /// working. The realtime session is left alone: its next turn cancels its own reply, and only
     /// the stop button silences it outright.
-    private func interruptCurrentAnswer(includingAgentWork: Bool) {
-        stopWatchingForGuidedStep()
+    /// `keepingAGuideThatWaitsForContinue`: a ⌃⌥ press or a typed request leaves a guide that waits
+    /// for "continue" watching, because what is said may be that "continue" (and the clicks made
+    /// meanwhile still count for the off-target check). `sendTranscriptToClaudeWithScreenshot`
+    /// decides once the words are known.
+    private func interruptCurrentAnswer(includingAgentWork: Bool, keepingAGuideThatWaitsForContinue: Bool = false) {
+        if !(keepingAGuideThatWaitsForContinue && guideWaitsForSpokenContinue) {
+            stopWatchingForGuidedStep()
+        }
         settingsTour.stop()
         stopActiveAnswer()
         currentResponseTask?.cancel()
@@ -1464,7 +1471,7 @@ final class CompanionManager: ObservableObject {
         if !isClickyCursorEnabled && !isOverlayVisible {
             showOverlayOnAllScreens()
         }
-        interruptCurrentAnswer(includingAgentWork: true)
+        interruptCurrentAnswer(includingAgentWork: true, keepingAGuideThatWaitsForContinue: true)
         clearDetectedElementLocation()
         dismissCursorCaption()
         TeacherPlugin.clearBoard(reason: "a new question")
@@ -1559,7 +1566,7 @@ final class CompanionManager: ObservableObject {
             }
 
             // Cancel any in-progress response, agent run, and TTS from a previous utterance
-            interruptCurrentAnswer(includingAgentWork: true)
+            interruptCurrentAnswer(includingAgentWork: true, keepingAGuideThatWaitsForContinue: true)
             clearDetectedElementLocation()
 
             // Dismiss the onboarding prompt / caption if it's showing
@@ -1686,7 +1693,13 @@ final class CompanionManager: ObservableObject {
     /// the spinner/processing state until TTS audio begins playing.
     /// Claude's response may include a [POINT:x,y:label] tag which triggers
     /// the buddy to fly to that element on screen.
-    private func sendTranscriptToClaudeWithScreenshot(transcript: String, isGuidedStepContinuation: Bool = false) {
+    private func sendTranscriptToClaudeWithScreenshot(transcript spokenOrTypedTranscript: String, isGuidedStepContinuation requestedAsGuidedStepContinuation: Bool = false) {
+        // A guide waiting for "continue" hears it here: the words become its "what's next?".
+        let spokenContinueRequest = requestedAsGuidedStepContinuation ? nil : nextStepRequestIfTheyToldTheGuideToContinue(spokenOrTypedTranscript)
+        let transcript = spokenContinueRequest ?? spokenOrTypedTranscript
+        let isGuidedStepContinuation = requestedAsGuidedStepContinuation || spokenContinueRequest != nil
+        // Anything else said while it waits is a new question and ends that guide.
+        guideWaitsForSpokenContinue = false
         interruptCurrentAnswer(includingAgentWork: false)
         // Anything the person asks starts afresh; only OpenClicky's own "what's next?" continues a guide.
         if !isGuidedStepContinuation {
@@ -1874,7 +1887,7 @@ final class CompanionManager: ObservableObject {
                 do {
                     (fullResponseText, toolCalls, _) = try await claudeAPI.analyzeImageStreaming(
                         images: labeledImages,
-                        systemPrompt: Self.composeTalkInstructions(base: Self.withReplyLanguage(Self.companionVoiceResponseSystemPrompt + Self.pluginPromptLines()) + toolsLine + writeInPlaceLine, skillsBlock: talkSkillsBlock()),
+                        systemPrompt: Self.composeTalkInstructions(base: Self.withReplyLanguage(Self.companionVoiceResponseSystemPrompt + guideAdvanceLine + Self.pluginPromptLines()) + toolsLine + writeInPlaceLine, skillsBlock: talkSkillsBlock()),
                         conversationHistory: historyForAPI,
                         userPrompt: Self.askUserPrompt(transcript: transcript, writingTarget: writingTarget, pointer: pointer, isRepeatedQuestion: isRepeatedQuestion),
                         tools: askTools,
@@ -2137,6 +2150,33 @@ final class CompanionManager: ObservableObject {
     /// there is no guide. The island turns into the guide's stop strip and the pointer carries
     /// "esc to stop" while it is set.
     @Published private(set) var guideStepUnderWay: Int?
+    /// The step given is waiting for the person to hold ⌃⌥ and say "continue" (Settings → Clicky →
+    /// "Wait for me to say continue"), not for a click. The pointer's tag says so while it is set.
+    @Published private(set) var guideWaitsForSpokenContinue = false
+
+    /// What the ask prompt adds when guides wait for "continue": the model must not tell them a
+    /// click moves it on, and must not hurry them.
+    private var guideAdvanceLine: String {
+        guard dictationSettings.guidesWaitForSpokenContinue else { return "" }
+        return """
+
+        how guided steps move on for this person: clicks, return and tab do not move the guide on. after each step openclicky waits, as long as they need, until they hold the talk keys and say "continue", then asks you for the next step exactly as described above, with a fresh screenshot. so they can do the step at their own pace. never say the next step will come when they click, never hurry them, and don't say "say continue" yourself, the pointer already shows it.
+        """
+    }
+
+    /// A short "continue" (or "next", "done", `GuidedStepContinuePhrase`) said while a guide waits
+    /// for one: the guide's own next-step request, the last click checked against where the pointer
+    /// pointed as a finished click would be. Nil for anything else, or when no guide waits.
+    private func nextStepRequestIfTheyToldTheGuideToContinue(_ spokenOrTypedTranscript: String) -> String? {
+        guard guideWaitsForSpokenContinue, GuidedStepContinuePhrase.isContinue(spokenOrTypedTranscript) else { return nil }
+        let lastClickWhileTheStepWaited = guidedStepWatcher?.lastClickLocation
+        let clickCheck = GuidedStepClickCheck.verdict(pointedAt: guidedStepPointedLocation, clickedAt: lastClickWhileTheStepWaited)
+        AppLog.append("guide: step \(guidedStepsGivenSoFar) continued by voice (\(clickCheck)), asking for the next")
+        if case .offTarget = clickCheck {
+            showAskCaption(GuidedStepClickCheck.offTargetCaption, holdSeconds: 4)
+        }
+        return GuidedStepRules.nextStepRequest(forGoal: guidedStepGoal, clickCheck: clickCheck)
+    }
 
     /// The reply was one step of a guide: once the person does it, ask for the next step on a fresh screenshot.
     private func waitForTheGuidedStepToBeDone() {
@@ -2144,11 +2184,14 @@ final class CompanionManager: ObservableObject {
         guard guidedStepsGivenSoFar < GuidedStepRules.maximumSteps else {
             AppLog.append("guide: stopped after \(guidedStepsGivenSoFar) steps")
             guideStepUnderWay = nil
+            guideWaitsForSpokenContinue = false
             return
         }
         stopWatchingForGuidedStep()
-        AppLog.append("guide: step \(guidedStepsGivenSoFar) given, waiting for a click or return")
+        let advancesOnlyWhenTold = dictationSettings.guidesWaitForSpokenContinue
+        AppLog.append("guide: step \(guidedStepsGivenSoFar) given, waiting for \(advancesOnlyWhenTold ? "a spoken continue" : "a click or return")")
         let watcher = GuidedStepWatcher(
+            advancesOnlyWhenTold: advancesOnlyWhenTold,
             onStepDone: { [weak self] clickLocation in
                 guard let self else { return }
                 let clickCheck = GuidedStepClickCheck.verdict(pointedAt: self.guidedStepPointedLocation, clickedAt: clickLocation)
@@ -2165,6 +2208,7 @@ final class CompanionManager: ObservableObject {
                 guard let self else { return }
                 AppLog.append("guide: ended (\(reason.rawValue)) after \(self.guidedStepsGivenSoFar) steps")
                 self.guidedStepWatcher = nil
+                self.guideWaitsForSpokenContinue = false
                 // Esc means stop: the step still being said goes quiet too, as esc does anywhere else.
                 if reason == .escape {
                     self.stopAskLane(from: "esc during a guide")
@@ -2176,6 +2220,7 @@ final class CompanionManager: ObservableObject {
         )
         guidedStepWatcher = watcher
         guideStepUnderWay = guidedStepsGivenSoFar
+        guideWaitsForSpokenContinue = advancesOnlyWhenTold
         watcher.start()
     }
 
@@ -2237,6 +2282,7 @@ final class CompanionManager: ObservableObject {
         }
         guidedStepsGivenSoFar = 0
         guideStepUnderWay = nil
+        guideWaitsForSpokenContinue = false
         interruptCurrentAnswer(includingAgentWork: true)
         clearDetectedElementLocation()
         // A cancelled answer skips its own reset to idle.

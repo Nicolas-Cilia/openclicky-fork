@@ -271,7 +271,8 @@ struct BlueCursorView: View {
             // to leave it: someone new to the guide had no idea it could be stopped. Left of the
             // pointer, so it never covers the answer caption on its right.
             if isCursorOnThisScreen && companionManager.guideStepUnderWay != nil && companionManager.voiceState == .idle {
-                Text("esc to stop")
+                // A guide that waits for a spoken "continue" says how to move on as well.
+                Text(companionManager.guideWaitsForSpokenContinue ? "hold ⌃⌥, say “continue” · esc to stop" : "esc to stop")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundColor(.white.opacity(0.9))
                     .padding(.horizontal, 6)
