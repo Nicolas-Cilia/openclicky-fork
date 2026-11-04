@@ -286,6 +286,9 @@ public sealed class PlanUsageSink
     public Action<PlanUsageSample> Record { get; init; } = _ => { };
     public Action<AnswerSource, PlanLimitSnapshot> Limits { get; init; } = (_, _) => { };
 
+    /// <summary>Called as a Codex request starts; call what it returns when the request ends.</summary>
+    public Func<Action> BeginCodexRequest { get; init; } = () => () => { };
+
     public static PlanUsageSink None { get; } = new();
 
     public static PlanUsageSink Live { get; } = new()
@@ -296,6 +299,7 @@ public sealed class PlanUsageSink
             if (sample.Source == AnswerSource.CodexPlan.Id()) _ = PlanLimitStore.Shared.RefreshCodexAsync();
         },
         Limits = (source, snapshot) => PlanLimitStore.Shared.Ingest(snapshot, source),
+        BeginCodexRequest = () => PlanLimitStore.Shared.BeginCodexRequest(),
     };
 }
 
@@ -305,13 +309,18 @@ public sealed class PlanLimitStore
     public static PlanLimitStore Shared => SharedInstance.Value;
 
     private const string PreferencesKey = "openclicky.plans.limits";
+    private const string MeasuredKey = "openclicky.plans.codexMeasured";
     private static readonly TimeSpan CodexRefreshInterval = TimeSpan.FromSeconds(60);
+
+    /// <summary>Codex can take a moment to count a finished request against its limits.</summary>
+    public static readonly TimeSpan CodexSettleTime = TimeSpan.FromSeconds(5);
 
     private readonly Preferences preferences;
     private readonly Func<Task<PlanLimitSnapshot?>> readCodex;
     private readonly object stateLock = new();
     private readonly Dictionary<AnswerSource, PlanLimitSnapshot> snapshots = [];
     private DateTimeOffset? lastCodexRead;
+    private IReadOnlyList<MeasuredPlanWindow> codexMeasured = [];
 
     public PlanAvailability Availability { get; }
 
@@ -335,6 +344,56 @@ public sealed class PlanLimitStore
             }
         }
         catch (JsonException) { }
+        try
+        {
+            if (preferences.GetString(MeasuredKey) is { } json && JsonSerializer.Deserialize<List<MeasuredPlanWindow>>(json) is { } measured)
+            {
+                codexMeasured = measured;
+            }
+        }
+        catch (JsonException) { }
+    }
+
+    /// <summary>How far Codex's limits moved across OpenClicky's requests (PlanUsageShare).</summary>
+    public IReadOnlyList<MeasuredPlanWindow> CodexMeasured
+    {
+        get { lock (stateLock) return codexMeasured; }
+    }
+
+    /// <summary>
+    /// Reads Codex's limits now, without holding up the request, and again once it has ended; the
+    /// difference is added to what OpenClicky has used of each window. Reading costs no usage.
+    /// </summary>
+    public Action BeginCodexRequest(TimeSpan? settleTime = null)
+    {
+        var reading = Task.Run(readCodex);
+        return () => _ = FinishCodexMeasurementAsync(reading, settleTime ?? CodexSettleTime);
+    }
+
+    private async Task FinishCodexMeasurementAsync(Task<PlanLimitSnapshot?> reading, TimeSpan settleTime)
+    {
+        try
+        {
+            var before = await reading.ConfigureAwait(false);
+            await Task.Delay(settleTime).ConfigureAwait(false);
+            if (await readCodex().ConfigureAwait(false) is not { } after) return;
+            string? saved = null;
+            lock (stateLock)
+            {
+                lastCodexRead = DateTimeOffset.UtcNow;
+                if (before is not null)
+                {
+                    codexMeasured = PlanUsageShare.Adding(before, after, codexMeasured);
+                    saved = JsonSerializer.Serialize(codexMeasured);
+                }
+            }
+            if (saved is not null) preferences.Set(MeasuredKey, saved);
+            Ingest(after, AnswerSource.CodexPlan);
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            AppLog.Write($"plans: measuring codex's limits failed ({error.GetType().Name})");
+        }
     }
 
     public PlanLimitSnapshot? Snapshot(AnswerSource source)

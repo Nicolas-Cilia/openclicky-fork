@@ -218,6 +218,7 @@ internal sealed partial class SettingsRowFactory
     {
         private readonly AnswerSource plan;
         private readonly string query;
+        private IReadOnlyList<LocalClaudeUsage> localClaudeUsage = [];
 
         public PlanUsageRow(AnswerSource plan, string query)
         {
@@ -230,6 +231,7 @@ internal sealed partial class SettingsRowFactory
                 PlanUsageLedger.Changed += OnChanged;
                 PlanLimitStore.Shared.Changed += OnChanged;
                 Render();
+                await ReloadLocalClaudeUsageAsync();
                 if (plan == AnswerSource.CodexPlan) await PlanLimitStore.Shared.RefreshCodexAsync(force: true);
             };
             Unloaded += (_, _) =>
@@ -239,7 +241,47 @@ internal sealed partial class SettingsRowFactory
             };
         }
 
-        private void OnChanged() => Dispatcher.BeginInvoke(Render);
+        private void OnChanged() => Dispatcher.BeginInvoke(async () =>
+        {
+            Render();
+            await ReloadLocalClaudeUsageAsync();
+        });
+
+        /// <summary>Claude Code's logs, read away from the UI thread, back as far as the oldest window starts.</summary>
+        private async Task ReloadLocalClaudeUsageAsync()
+        {
+            if (plan != AnswerSource.ClaudeCodePlan) return;
+            var windows = PlanLimitStore.Shared.Snapshot(plan)?.Windows ?? [];
+            var starts = windows.Select(PlanUsageShare.Start).OfType<DateTimeOffset>().ToList();
+            if (starts.Count == 0) return;
+            var oldest = starts.Min();
+            localClaudeUsage = await Task.Run(() => PlanUsageShare.ReadLocalClaudeUsage(oldest));
+            Render();
+        }
+
+        /// <summary>OpenClicky's rough part of one bar (PlanUsageShare).</summary>
+        private double? OpenClickyFraction(PlanLimitWindow window, IReadOnlyList<PlanUsageSample> samples) =>
+            plan == AnswerSource.CodexPlan
+                ? PlanUsageShare.CodexFraction(window, PlanLimitStore.Shared.CodexMeasured)
+                : PlanUsageShare.ClaudeFraction(window, samples, localClaudeUsage);
+
+        /// <summary>A limit's bar: how full it is, with OpenClicky's rough part highlighted at the start.</summary>
+        private static UIElement Bar(double used, double? openClicky)
+        {
+            const double width = 130, height = 6;
+            var bar = new Grid { Width = width, Height = height, Margin = new Thickness(0, 2, 0, 2), HorizontalAlignment = HorizontalAlignment.Right };
+            void Add(Brush brush, double segment) => bar.Children.Add(new Border
+            {
+                Background = brush, CornerRadius = new CornerRadius(height / 2), HorizontalAlignment = HorizontalAlignment.Left, Width = segment,
+            });
+            Add(new SolidColorBrush(Color.FromArgb(0x30, 0x80, 0x80, 0x80)), width);
+            Add(new SolidColorBrush(Color.FromRgb(0x3B, 0x82, 0xF6)), width * Math.Clamp(used, 0, 1));
+            // Always wide enough to see: "under 1%" is still something.
+            if (openClicky is { } share) Add(OpenClickyBrush, Math.Max(height, width * Math.Clamp(share, 0, 1)));
+            return bar;
+        }
+
+        private static readonly Brush OpenClickyBrush = new SolidColorBrush(Colors.Orange);
 
         private void Render()
         {
@@ -250,12 +292,35 @@ internal sealed partial class SettingsRowFactory
             var detail = PlanRows.UsageDetail(
                 PlanUsageLedger.Shared.Totals(plan, startOfDay), PlanUsageLedger.Shared.Totals(plan, startOfMonth),
                 snapshot, PlanAvailability.Shared.ExhaustedUntil(plan));
+            var samples = PlanUsageLedger.Shared.Samples();
+            var anyShare = false;
             var bars = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right };
             foreach (var window in snapshot?.Windows ?? [])
             {
+                var share = OpenClickyFraction(window, samples);
+                anyShare |= share is not null;
                 bars.Children.Add(Ui.Text($"{window.Title}: {(int)Math.Round(window.UsedFraction * 100, MidpointRounding.AwayFromZero)}% used", SettingsLook.CaptionSize, SettingsLook.TextSecondary, wrap: false));
-                bars.Children.Add(new ProgressBar { Maximum = 1, Value = window.UsedFraction, Width = 130, Height = 4, Margin = new Thickness(0, 3, 0, 3) });
+                bars.Children.Add(Bar(window.UsedFraction, share));
+                if (share is { } part)
+                {
+                    bars.Children.Add(new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Children =
+                        {
+                            new System.Windows.Shapes.Ellipse { Width = 6, Height = 6, Fill = OpenClickyBrush, Margin = new Thickness(0, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center },
+                            Ui.Text(PlanUsageShare.Label(part), SettingsLook.CaptionSize, SettingsLook.TextSecondary, wrap: false),
+                        },
+                    });
+                }
                 if (PlanRows.ResetText(window.ResetsAt) is { } reset) bars.Children.Add(Ui.Text(reset, SettingsLook.CaptionSize, SettingsLook.TextSecondary, wrap: false));
+            }
+            if (anyShare)
+            {
+                detail += plan == AnswerSource.CodexPlan
+                    ? "\nOrange is OpenClicky's rough share: how far the bar moved during its requests."
+                    : "\nOrange is OpenClicky's rough share, compared with Claude use logged on this computer.";
             }
             Content = Ui.Card(Ui.Row($"{plan.ShortName()} usage", detail, query, bars));
         }

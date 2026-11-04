@@ -383,6 +383,23 @@ threads
   });
 
 threads
+  .command("prune")
+  .description("delete threads, and the screenshots saved in them, untouched for this many days")
+  .requiredOption("--older-than-days <n>", "age limit in days; 0 keeps everything")
+  .option("--json", "print JSON")
+  .option("--verbose")
+  .action(async (opts) => {
+    try {
+      const days = Number(opts.olderThanDays);
+      if (!Number.isInteger(days) || days < 0) throw new Error("--older-than-days takes a whole number, 0 or more");
+      const deleted = days === 0 ? [] : await withThreadAgent(opts, (a) => a.pruneThreads(days));
+      process.stdout.write(opts.json ? JSON.stringify({ deleted }) + "\n" : `deleted ${deleted.length} thread(s)\n`);
+    } catch (e) {
+      propagate(e);
+    }
+  });
+
+threads
   .command("archive")
   .description("archive a thread")
   .argument("<id>")

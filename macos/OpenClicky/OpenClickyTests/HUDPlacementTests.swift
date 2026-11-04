@@ -5,6 +5,8 @@
 //  Where the island sits for each placement, and the goodbye lines.
 //
 
+import AppKit
+import SwiftUI
 import Testing
 import Foundation
 import CoreGraphics
@@ -22,6 +24,21 @@ struct HUDPlacementTests {
         let model = NotchHUDModel(geometry: geometry)
         model.placement = placement
         return model
+    }
+
+    /// Measured, not assumed: the shortcuts' keycaps can't shrink, so a row wider than the drawer
+    /// spills past both of its edges.
+    @MainActor @Test func aDrawersShortcutsFitInsideItsPadding() {
+        let island = model(.right)
+        island.selectComponent("shortcuts")
+        island.openPinned()
+        let room = island.width - DS.HUD.bodySidePadding * 2
+        for key in ["fn", "right ⌥", "right ⌘", "right ⌃"] {
+            let rows = NSHostingView(rootView: NotchShortcutRows(dictationKey: key, handsFreeIsLive: true, isStacked: true).fixedSize())
+            #expect(rows.fittingSize.width <= room, "\(key): \(rows.fittingSize.width) wide, \(room) to fit in")
+            #expect(rows.fittingSize.height == NotchShortcutRows.stackedHeight)
+        }
+        #expect(island.slotHeight == NotchPanelBody.drawerHeight)
     }
 
     @Test func theShortcutsRowUnderTheNotchIsAtMost88PointsTall() {

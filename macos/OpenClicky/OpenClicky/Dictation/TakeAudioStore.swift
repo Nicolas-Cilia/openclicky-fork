@@ -4,7 +4,7 @@
 //
 //  "retry failed dictations": the audio of a take that a network engine could not finish is kept
 //  on this Mac as a WAV, so the take can be heard again once the key, the credits or the network
-//  are back. Bounded (100 takes, 1 GB); nothing is kept once a take succeeds or is cancelled, and
+//  are back. Bounded (100 takes, 200 MB); nothing is kept once a take succeeds or is cancelled, and
 //  nothing is kept at all when the setting is off.
 //
 
@@ -16,7 +16,7 @@ final class TakeAudioStore: @unchecked Sendable {
     static let defaultDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/OpenClicky/TakeAudio")
     static let maxRetainedTakes = 100
-    static let maxRetainedBytes: UInt64 = 1_000_000_000
+    static let maxRetainedBytes: UInt64 = 200_000_000
     /// A take longer than this is cut off in memory (ten minutes of 16 kHz PCM16 is 19 MB).
     static let maxCaptureBytes = 16_000 * 2 * 600
 

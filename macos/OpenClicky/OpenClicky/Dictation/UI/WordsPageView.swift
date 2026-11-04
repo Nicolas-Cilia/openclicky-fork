@@ -522,7 +522,9 @@ struct WordsPageView: View {
     }
 
     private func delete(_ take: TakeRecord) {
-        if !WordsHistoryWrite.perform("delete", takeID: take.id, { try companionManager.dictationTakeStore?.delete(takeID: take.id) }) {
+        if WordsHistoryWrite.perform("delete", takeID: take.id, { try companionManager.dictationTakeStore?.delete(takeID: take.id) }) {
+            companionManager.dictationTakeController.audioStore.discard(takeID: take.id)
+        } else {
             historyProblem = "Couldn't delete that take. The log says why."
         }
         if selectedTakeID == take.id { selectedTakeID = nil }
@@ -718,7 +720,9 @@ private struct WordsTakeDetailSheet: View {
                 .pointerCursor()
                 .help("Hides OpenClicky, then pastes into the app behind it")
                 Button("Delete", role: .destructive) {
-                    WordsHistoryWrite.perform("delete", takeID: take.id, { try companionManager.dictationTakeStore?.delete(takeID: take.id) })
+                    if WordsHistoryWrite.perform("delete", takeID: take.id, { try companionManager.dictationTakeStore?.delete(takeID: take.id) }) {
+                        companionManager.dictationTakeController.audioStore.discard(takeID: take.id)
+                    }
                     companionManager.dictationTakeController.historyDidChange()
                     onClose()
                 }

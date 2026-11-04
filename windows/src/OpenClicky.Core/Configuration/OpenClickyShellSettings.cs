@@ -87,6 +87,9 @@ public sealed class OpenClickyShellSettings
     /// <summary>Which inbox "check my email" and "draft an email" use ("gmail", "outlook"); null → automatic (Gmail).</summary>
     [JsonPropertyName("emailApp")] public string? EmailApp { get; set; }
 
+    /// <summary>How many days an agent task and its screenshots stay on this PC; 0 keeps them, null is the default (AgentSessionLimit).</summary>
+    [JsonPropertyName("agentSessionDays")] public int? AgentSessionDays { get; set; }
+
     /// <summary>The Kokoro speaker picked in Settings; null → the language's default.</summary>
     [JsonPropertyName("kokoroSpeaker")] public int? KokoroSpeaker { get; set; }
 

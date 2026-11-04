@@ -124,6 +124,25 @@ export interface CodexAgentHooks {
   onApproval?: (req: ApprovalRequest) => Promise<ApprovalDecision>;
 }
 
+/** thread/list only returns interactive threads unless told otherwise. */
+const ALL_THREAD_SOURCES = ["cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"];
+
+export interface PrunableThread {
+  id: string;
+  createdAt?: number;
+  updatedAt?: number;
+  status?: { type?: string };
+}
+
+/** The ids of threads last touched before the limit (seconds since 1970); a running thread never counts. */
+export function threadsPastLimit(threads: PrunableThread[], olderThanDays: number, now: number): string[] {
+  if (olderThanDays <= 0) return [];
+  const cutoff = now / 1000 - olderThanDays * 86_400;
+  return threads
+    .filter((t) => t.status?.type !== "active" && (t.updatedAt ?? t.createdAt ?? Number.POSITIVE_INFINITY) < cutoff)
+    .map((t) => t.id);
+}
+
 export interface ThreadSummary {
   id: string;
   preview: string;
@@ -380,6 +399,36 @@ export class CodexAgent {
         commands: (turn.items ?? []).filter((i: any) => i.type === "commandExecution").map((i: any) => i.command ?? ""),
       })),
     };
+  }
+
+  /**
+   * Deletes every thread untouched for `olderThanDays` days and returns their ids. Codex's own
+   * delete, so its database forgets the thread along with the session file, and the screenshots
+   * saved inside that file go too. Zero or less keeps everything. One failed delete doesn't stop
+   * the others; the next prune tries it again.
+   */
+  async pruneThreads(olderThanDays: number, now = Date.now()): Promise<string[]> {
+    if (olderThanDays <= 0) return [];
+    const rpc = this.requireRpc();
+    const threads: PrunableThread[] = [];
+    for (const archived of [false, true]) {
+      let cursor: string | undefined;
+      do {
+        const page = await this.race(rpc.request<any>("thread/list", { limit: 100, sortKey: "updated_at", archived, sourceKinds: ALL_THREAD_SOURCES, ...(cursor ? { cursor } : {}) }));
+        threads.push(...(page.data ?? []));
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+    }
+    const deleted: string[] = [];
+    for (const id of threadsPastLimit(threads, olderThanDays, now)) {
+      try {
+        await this.race(rpc.request("thread/delete", { threadId: id }));
+        deleted.push(id);
+      } catch (e) {
+        this.log(`couldn't delete thread ${id}: ${(e as Error).message}`);
+      }
+    }
+    return deleted;
   }
 
   async archiveThread(threadId: string): Promise<void> {

@@ -71,7 +71,7 @@ enum SettingsLayout {
     ]
 
     private static let keysGroups: [Group] = [
-        Group(page: .keys, title: "Plans", itemIDs: ["keys.claudeCodePlan", "keys.codexPlan", "keys.plansNote"]),
+        Group(page: .keys, title: "Plans", itemIDs: ["keys.claudeCodePlan", "keys.codexPlan", "keys.usage.claudeCodePlan", "keys.usage.codexPlan", "keys.plansNote"]),
         Group(page: .keys, title: "Your keys", itemIDs: ["keys.list", "keys.keysNote"]),
     ]
 
@@ -81,7 +81,7 @@ enum SettingsLayout {
         ]),
         Group(page: .privacy, title: "Your screen", itemIDs: ["privacy.readNearbyText", "privacy.pauseBeforeSendingScreen"]),
         Group(page: .privacy, title: "What it keeps", itemIDs: [
-            "privacy.memoryOnThisMac", "privacy.clipboardHistory", "privacy.retryFailedTakes", "privacy.deleteTakes", "privacy.summary",
+            "privacy.memoryOnThisMac", "privacy.clipboardHistory", "privacy.retryFailedTakes", "privacy.agentSessions", "privacy.deleteTakes", "privacy.summary",
         ]),
         // Incognito's switch is in the sidebar's foot; search still finds it here.
         Group(page: .privacy, title: "Sidebar", showsOnPage: false, itemIDs: ["privacy.incognito"]),

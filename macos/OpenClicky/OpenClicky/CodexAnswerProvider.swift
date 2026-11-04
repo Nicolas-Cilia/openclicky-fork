@@ -81,6 +81,8 @@ nonisolated struct CodexAnswerProvider: AnswerProvider {
         }
         let outputFilePath = scratchWorkingDirectory.appendingPathComponent(Self.outputFileName).path
 
+        let finishMeasuring = await usageSink.beginCodexRequest()
+        defer { finishMeasuring() }
         let output: PlanCLIProcessOutput
         do {
             output = try await processRunner.run(

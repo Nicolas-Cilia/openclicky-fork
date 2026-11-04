@@ -86,27 +86,35 @@ public sealed class CodexAnswerProvider(
             }
             var outputFilePath = Path.Combine(scratchWorkingDirectory, OutputFileName);
 
+            var finishMeasuring = this.usageSink.BeginCodexRequest();
             PlanCliProcessOutput output;
             try
             {
-                output = await processRunner.RunAsync(
-                    ExecutablePath,
-                    CommandLineArguments(Model, PlanToolProtocol.SystemPrompt(request.SystemPrompt, request.Tools),
-                                         imageFilePaths, outputFilePath, scratchWorkingDirectory),
-                    Encoding.UTF8.GetBytes(PromptText(request)),
-                    scratchWorkingDirectory,
-                    PlanCLIs.ProcessEnvironment(ExecutablePath),
-                    TimeoutSeconds,
-                    null,
-                    cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    output = await processRunner.RunAsync(
+                        ExecutablePath,
+                        CommandLineArguments(Model, PlanToolProtocol.SystemPrompt(request.SystemPrompt, request.Tools),
+                                             imageFilePaths, outputFilePath, scratchWorkingDirectory),
+                        Encoding.UTF8.GetBytes(PromptText(request)),
+                        scratchWorkingDirectory,
+                        PlanCLIs.ProcessEnvironment(ExecutablePath),
+                        TimeoutSeconds,
+                        null,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception)
+                {
+                    throw new AnswerProviderException(AnswerSource.CodexPlan, 0, $"Couldn't start Codex at {ExecutablePath}.");
+                }
             }
-            catch (OperationCanceledException)
+            finally
             {
-                throw;
-            }
-            catch (Exception)
-            {
-                throw new AnswerProviderException(AnswerSource.CodexPlan, 0, $"Couldn't start Codex at {ExecutablePath}.");
+                finishMeasuring();
             }
             cancellationToken.ThrowIfCancellationRequested();
 

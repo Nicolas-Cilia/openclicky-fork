@@ -370,19 +370,25 @@ struct BlueCursorView: View {
                 .position(x: cursorPosition.x - 8, y: cursorPosition.y - 12)
                 .allowsHitTesting(false)
 
-            // Blue waveform — replaces the triangle while listening
-            BlueCursorWaveformView(audioPowerLevel: companionManager.currentAudioPowerLevel)
-                .opacity(buddyIsVisibleOnThisScreen && companionManager.voiceState == .listening ? cursorOpacity : 0)
-                .position(cursorPosition)
-                .animation(.spring(response: 0.2, dampingFraction: 0.6, blendDuration: 0), value: cursorPosition)
-                .animation(.easeIn(duration: 0.15), value: companionManager.voiceState)
-
-            // Blue spinner — shown while the AI is processing (transcription + Claude + waiting for TTS)
-            BlueCursorSpinnerView()
-                .opacity(buddyIsVisibleOnThisScreen && companionManager.voiceState == .processing ? cursorOpacity : 0)
-                .position(cursorPosition)
-                .animation(.spring(response: 0.2, dampingFraction: 0.6, blendDuration: 0), value: cursorPosition)
-                .animation(.easeIn(duration: 0.15), value: companionManager.voiceState)
+            // Blue waveform and spinner, in place of the triangle. Only in the view while they show:
+            // an invisible one keeps animating, which cost 12% of a core with nothing on screen.
+            Group {
+                if buddyIsVisibleOnThisScreen && companionManager.voiceState == .listening {
+                    BlueCursorWaveformView(audioPowerLevel: companionManager.currentAudioPowerLevel)
+                        .opacity(cursorOpacity)
+                        .position(cursorPosition)
+                        .animation(.spring(response: 0.2, dampingFraction: 0.6, blendDuration: 0), value: cursorPosition)
+                        .transition(.opacity)
+                } else if buddyIsVisibleOnThisScreen && companionManager.voiceState == .processing {
+                    // Shown while the AI is processing (transcription + Claude + waiting for TTS).
+                    BlueCursorSpinnerView()
+                        .opacity(cursorOpacity)
+                        .position(cursorPosition)
+                        .animation(.spring(response: 0.2, dampingFraction: 0.6, blendDuration: 0), value: cursorPosition)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeIn(duration: 0.15), value: companionManager.voiceState)
 
         }
         .frame(width: screenFrame.width, height: screenFrame.height)
@@ -427,6 +433,9 @@ struct BlueCursorView: View {
         .onDisappear {
             timer?.invalidate()
             navigationAnimationTimer?.invalidate()
+        }
+        .onChange(of: followsMouseSmoothly) { _ in
+            if timer != nil { startTrackingCursor() }
         }
         .onChange(of: companionManager.detectedElementPointToken) { _ in
             // Every pointAt bumps the token, so repeated coordinates re-fly too. The location
@@ -493,8 +502,14 @@ struct BlueCursorView: View {
 
     // MARK: - Cursor Tracking
 
+    /// Whether the pointer is on show here, so following the mouse has to look smooth. Otherwise a
+    /// slow tick is enough to notice the mouse arriving or the pointer waking.
+    private var followsMouseSmoothly: Bool { isCursorOnThisScreen && presenceAllowsPointer }
+
     private func startTrackingCursor() {
-        timer = Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { _ in
+        timer?.invalidate()
+        let interval = followsMouseSmoothly ? 0.016 : 0.1
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             let mouseLocation = NSEvent.mouseLocation
             self.isCursorOnThisScreen = self.screenFrame.contains(mouseLocation)
 

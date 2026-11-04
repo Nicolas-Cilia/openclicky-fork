@@ -104,6 +104,10 @@ final class OpenClickyAgentClient {
         if let screenshotPath { arguments += ["--image", screenshotPath] }
         if let threadId { arguments += ["--thread", threadId] }
         if let model = OpenClickyConfiguration.agentModelOverride { arguments += ["--model", model] }
+        // A task on an own key doesn't touch the plan's limits.
+        var finishMeasuring: (@Sendable () -> Void)?
+        if !ProviderCapabilities.current().hasOwnOpenAIKey { finishMeasuring = await PlanLimitStore.shared.beginCodexRequest() }
+        defer { finishMeasuring?() }
         return try await execute(arguments: arguments, onEvent: onEvent)
     }
 
@@ -111,6 +115,13 @@ final class OpenClickyAgentClient {
     func listThreads(limit: Int = 30) async throws -> [OpenClickyThreadSummary] {
         let data = try await captureStandardOutput(arguments: ["threads", "list", "--limit", String(limit), "--json"])
         return try JSONDecoder().decode([OpenClickyThreadSummary].self, from: data)
+    }
+
+    /// Deletes threads untouched for `days` days, and returns their ids.
+    func pruneThreads(olderThanDays days: Int) async throws -> [String] {
+        struct Reply: Decodable { let deleted: [String] }
+        let data = try await captureStandardOutput(arguments: ["threads", "prune", "--older-than-days", String(days), "--json"])
+        return try JSONDecoder().decode(Reply.self, from: data).deleted
     }
 
     /// Full turn history of one thread.

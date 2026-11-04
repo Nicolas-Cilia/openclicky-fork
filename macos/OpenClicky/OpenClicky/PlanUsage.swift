@@ -203,6 +203,8 @@ nonisolated final class PlanAvailability: @unchecked Sendable {
 nonisolated struct PlanUsageSink: Sendable {
     var record: @Sendable (PlanUsageSample) -> Void = { _ in }
     var limits: @Sendable (AnswerSource, PlanLimitSnapshot) -> Void = { _, _ in }
+    /// Called as a Codex request starts; call what it returns when the request ends.
+    var beginCodexRequest: @Sendable () async -> @Sendable () -> Void = { { } }
 
     static let none = PlanUsageSink()
     static let live = PlanUsageSink(
@@ -214,16 +216,22 @@ nonisolated struct PlanUsageSink: Sendable {
         },
         limits: { source, snapshot in
             Task { @MainActor in PlanLimitStore.shared.ingest(snapshot, for: source) }
-        })
+        },
+        beginCodexRequest: { await PlanLimitStore.shared.beginCodexRequest() })
 }
 
 @MainActor
 final class PlanLimitStore: ObservableObject {
     static let shared = PlanLimitStore(defaults: .standard, availability: .shared)
     private static let defaultsKey = "openclicky.plans.limits"
+    private static let measuredKey = "openclicky.plans.codexMeasured"
     private static let codexRefreshInterval: TimeInterval = 60
+    /// Codex can take a moment to count a finished request against its limits.
+    nonisolated static let codexSettleNanoseconds: UInt64 = 5_000_000_000
 
     @Published private(set) var snapshots: [AnswerSource: PlanLimitSnapshot] = [:]
+    /// How far Codex's limits moved across OpenClicky's requests (PlanUsageShare).
+    @Published private(set) var codexMeasured: [MeasuredPlanWindow] = []
 
     private let defaults: UserDefaults
     private let availability: PlanAvailability
@@ -239,6 +247,31 @@ final class PlanLimitStore: ObservableObject {
            let saved = try? JSONDecoder().decode([String: PlanLimitSnapshot].self, from: data) {
             for (name, snapshot) in saved { if let source = AnswerSource(rawValue: name) { snapshots[source] = snapshot } }
         }
+        if let data = defaults.data(forKey: Self.measuredKey),
+           let saved = try? JSONDecoder().decode([MeasuredPlanWindow].self, from: data) {
+            codexMeasured = saved
+        }
+    }
+
+    /// Reads Codex's limits now, without holding up the request, and again once it has ended; the
+    /// difference is added to what OpenClicky has used of each window. Reading costs no usage.
+    func beginCodexRequest(settleNanoseconds: UInt64 = PlanLimitStore.codexSettleNanoseconds) -> @Sendable () -> Void {
+        let reading = Task { await readCodex() }
+        return { [weak self] in
+            Task { @MainActor [weak self] in
+                let before = await reading.value
+                try? await Task.sleep(nanoseconds: settleNanoseconds)
+                guard let self, let after = await self.readCodex() else { return }
+                self.lastCodexRead = Date()
+                if let before { self.recordCodexMeasurement(before: before, after: after) }
+                self.ingest(after, for: .codexPlan)
+            }
+        }
+    }
+
+    private func recordCodexMeasurement(before: PlanLimitSnapshot, after: PlanLimitSnapshot) {
+        codexMeasured = PlanUsageShare.adding(before: before, after: after, to: codexMeasured)
+        if let data = try? JSONEncoder().encode(codexMeasured) { defaults.set(data, forKey: Self.measuredKey) }
     }
 
     func ingest(_ snapshot: PlanLimitSnapshot, for source: AnswerSource) {

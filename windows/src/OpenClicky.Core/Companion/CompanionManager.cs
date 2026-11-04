@@ -467,6 +467,7 @@ public sealed partial class CompanionManager : ObservableObject, ICompanionSetti
         StartPointerPresenceMonitor();
         AppLog.Write($"companion: start, mic {HasMicrophonePermission}, onboarded {HasCompletedOnboarding}");
         StartPermissionPolling();
+        StartAgentSessionCleanup();
         BindDictationManager();
         services.Shortcuts.ShortcutTransition += HandleShortcutTransition;
         services.Shortcuts.CompanionShortcut += HandleCompanionShortcut;
@@ -516,6 +517,7 @@ public sealed partial class CompanionManager : ObservableObject, ICompanionSetti
 
     public void Stop()
     {
+        StopAgentSessionCleanup();
         if (!isStarted) return;
         isStarted = false;
         StopDictation();

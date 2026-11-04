@@ -168,6 +168,27 @@ describe.skipIf(!hasCodex)("CodexAgent (real codex, fake model)", () => {
     }
   }, 90_000);
 
+  it("prunes a thread and its session file only once it is past the limit", async () => {
+    const { codexHome, cfg } = mk();
+    const agent = new CodexAgent(cfg, {});
+    const sessionFiles = (id: string) => fs.readdirSync(path.join(codexHome, "sessions"), { recursive: true }).filter((f) => String(f).includes(id));
+    try {
+      await agent.start();
+      const { threadId } = await agent.run("say something to keep");
+      expect(sessionFiles(threadId)).toHaveLength(1);
+
+      expect(await agent.pruneThreads(14)).toEqual([]);
+      expect(await agent.pruneThreads(0, Date.now() + 30 * 86_400_000)).toEqual([]); // 0 keeps everything
+      expect((await agent.listThreads(10)).map((t) => t.id)).toContain(threadId);
+
+      expect(await agent.pruneThreads(14, Date.now() + 30 * 86_400_000)).toEqual([threadId]);
+      expect((await agent.listThreads(10)).map((t) => t.id)).not.toContain(threadId);
+      expect(sessionFiles(threadId)).toHaveLength(0);
+    } finally {
+      await agent.stop();
+    }
+  }, 60_000);
+
   it("attaches an image when present and continues when missing", async () => {
     const { workspace, cfg } = mk();
     const events: string[] = [];

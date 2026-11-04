@@ -305,11 +305,11 @@ final class NotchHUDModel: ObservableObject {
     /// The capsule shows in the band only when there is something to flip to.
     var showsCapsule: Bool { capsuleIDs.count > 1 }
 
-    /// The active component's height: 45 pt for the shortcuts row under a notch, 92 in a side
-    /// drawer (the (i) stacks over the shortcut grid), else what the component asks for.
+    /// The active component's height: 45 pt for the shortcuts row under a notch, taller in a side
+    /// drawer (the (i) stacks over one column of shortcuts), else what the component asks for.
     var slotHeight: CGFloat {
         let component = registry.first { $0.id == selection.active } ?? registry[0]
-        if placement.isSideDrawer && (component.id == IslandComponentRegistry.shortcutsID || component.id == IslandComponentRegistry.homeID) { return 92 }
+        if placement.isSideDrawer && (component.id == IslandComponentRegistry.shortcutsID || component.id == IslandComponentRegistry.homeID) { return NotchPanelBody.drawerHeight }
         return component.preferredHeight
     }
 
@@ -1283,6 +1283,8 @@ final class NotchHUDManager {
                 }
             }
         }
+        // Lets macOS bundle this wake-up with others.
+        hoverPollTimer?.tolerance = 0.02
     }
 
     private func resizeWindow(_ instance: Instance) {

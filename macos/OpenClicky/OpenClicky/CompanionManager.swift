@@ -83,6 +83,7 @@ final class CompanionManager: ObservableObject {
 
     /// Codex thread reused across agent-lane requests in this session so follow-ups resume context.
     private var lastAgentThreadId: String?
+    private var agentSessionCleanupTask: Task<Void, Never>?
 
     /// Latest milestone from a running agent turn ("ran: …", "started thread …"), shown in the panel.
     @Published private(set) var agentActivityText: String?
@@ -839,6 +840,8 @@ final class CompanionManager: ObservableObject {
                 if awake != self.isPointerAwake { self.isPointerAwake = awake }
             }
         }
+        // Lets macOS bundle this wake-up with others; a shake takes far longer than this.
+        pointerPresenceTimer?.tolerance = 0.01
     }
 
     /// Whether the user has completed onboarding at least once. Persisted
@@ -864,6 +867,8 @@ final class CompanionManager: ObservableObject {
         startPointerPresenceMonitor()
         print("🔑 OpenClicky start, accessibility: \(hasAccessibilityPermission), screen: \(hasScreenRecordingPermission), mic: \(hasMicrophonePermission), screenContent: \(hasScreenContentPermission), onboarded: \(hasCompletedOnboarding)")
         startPermissionPolling()
+        AgentHousekeeping.removeLeftoverScreenshots()
+        startAgentSessionCleanup()
         bindVoiceStateObservation()
         bindAudioPowerLevel()
         bindShortcutTransitions()
@@ -1114,6 +1119,32 @@ final class CompanionManager: ObservableObject {
             Task { @MainActor [weak self] in
                 self?.hasMicrophonePermission = granted
             }
+        }
+    }
+
+    /// Deletes agent tasks past the limit in Settings → Privacy, soon after launch and then daily,
+    /// and whenever the limit changes.
+    private func startAgentSessionCleanup() {
+        agentSessionCleanupTask?.cancel()
+        agentSessionCleanupTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: AgentHousekeeping.firstCleanupDelayNanoseconds)
+            while !Task.isCancelled {
+                await self?.deleteExpiredAgentSessions()
+                try? await Task.sleep(nanoseconds: AgentHousekeeping.cleanupIntervalNanoseconds)
+            }
+        }
+    }
+
+    func deleteExpiredAgentSessions() async {
+        let days = AgentSessionLimit.days(stored: OpenClickyConfiguration.settings.agentSessionDays)
+        guard days > 0 else { return }
+        do {
+            let deleted = try await openClickyAgentClient.pruneThreads(olderThanDays: days)
+            if !deleted.isEmpty { AppLog.append("agent: deleted \(deleted.count) task(s) older than \(days) days") }
+            // A follow-up can't resume a task that is gone: it starts a new one.
+            if let last = lastAgentThreadId, deleted.contains(last) { lastAgentThreadId = nil }
+        } catch {
+            AppLog.append("agent: couldn't delete old tasks (\(error.localizedDescription))")
         }
     }
 
@@ -2443,9 +2474,10 @@ let nsError = failure.underlyingError as NSError
     /// the result card, and return the sentence to speak.
     private func performAgentTask(transcript: String, screenCaptures: [CompanionScreenCapture]) async throws -> String {
         var screenshotPath: String?
+        // Codex has read it by the time the run ends, whichever way the run ends.
+        defer { if let screenshotPath { try? FileManager.default.removeItem(atPath: screenshotPath) } }
         if let cursorScreenCapture = screenCaptures.first(where: { $0.isCursorScreen }) ?? screenCaptures.first {
-            let screenshotURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("openclicky-\(UUID().uuidString).jpg")
+            let screenshotURL = AgentHousekeeping.newScreenshotURL()
             if (try? cursorScreenCapture.imageData.write(to: screenshotURL)) != nil {
                 screenshotPath = screenshotURL.path
             }

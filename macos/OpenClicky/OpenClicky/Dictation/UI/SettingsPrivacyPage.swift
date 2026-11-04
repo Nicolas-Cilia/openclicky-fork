@@ -69,9 +69,14 @@ extension SettingsCatalog {
                 })),
             SettingsItem(
                 id: "privacy.retryFailedTakes",
-                title: "Keep failed takes to retry", detail: "Up to 100 takes or 1 GB. Off removes them now.",
+                title: "Keep failed takes to retry", detail: "Up to 100 takes or 200 MB. Off removes them now.",
                 keywords: ["retry", "audio", "recording", "failed", "network"],
                 view: AnyView(RetryFailedTakesRow(settings: settings, companionManager: companionManager))),
+            SettingsItem(
+                id: "privacy.agentSessions",
+                title: "Keep agent tasks for", detail: AgentSessionsRow.detail,
+                keywords: ["agent", "session", "thread", "screenshot", "image", "delete", "storage", "days"],
+                view: AnyView(AgentSessionsRow(companionManager: companionManager))),
             SettingsItem(
                 id: "privacy.deleteTakes",
                 title: "Delete all takes", detail: "Your dictionary and snippets stay.",
@@ -206,11 +211,36 @@ private struct RetryFailedTakesRow: View {
     let companionManager: CompanionManager
 
     var body: some View {
-        SettingsRow(title: "Keep failed takes to retry", detail: "Up to 100 takes or 1 GB. Off removes them now.") {
+        SettingsRow(title: "Keep failed takes to retry", detail: "Up to 100 takes or 200 MB. Off removes them now.") {
             SettingsSwitch(isOn: Binding(get: { settings.retainFailedTakeAudio }, set: { isOn in
                 settings.retainFailedTakeAudio = isOn
                 if !isOn { companionManager.dictationTakeController.audioStore.discardAll() }
             }))
+        }
+    }
+}
+
+private struct AgentSessionsRow: View {
+    static let detail = "Older tasks and their screenshots are deleted from this Mac. You can't continue a deleted task."
+
+    let companionManager: CompanionManager
+    @ObservedObject private var revision = ShellSettingsRevision.shared
+
+    var body: some View {
+        SettingsRow(title: "Keep agent tasks for", detail: Self.detail) {
+            Picker("", selection: Binding(
+                get: { AgentSessionLimit.days(stored: OpenClickyConfiguration.settings.agentSessionDays) },
+                set: { days in
+                    OpenClickyConfiguration.update { $0.agentSessionDays = days }
+                    ShellSettingsRevision.shared.noteChanged()
+                    Task { await companionManager.deleteExpiredAgentSessions() }
+                }
+            )) {
+                ForEach(AgentSessionLimit.choices, id: \.self) { Text(AgentSessionLimit.label($0)).tag($0) }
+            }
+            .labelsHidden()
+            .frame(maxWidth: 200)
+            .pointerCursor()
         }
     }
 }

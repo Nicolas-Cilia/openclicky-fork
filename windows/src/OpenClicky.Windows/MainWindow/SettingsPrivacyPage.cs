@@ -7,6 +7,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using OpenClicky.Core.Agent;
 using OpenClicky.Core.Configuration;
 using OpenClicky.Core.Dictation;
 using OpenClicky.Core.Platform;
@@ -39,6 +40,11 @@ internal sealed partial class SettingsRowFactory
                     Settings.RetainFailedTakeAudio = isOn;
                     if (!isOn) services.AudioStore.DiscardAll();
                 }, nameof(DictationSettings.RetainFailedTakeAudio));
+            case "privacy.agentSessions":
+                return Ui.Card(Ui.Row(item.Title, item.Detail, query, Ui.Picker(
+                    AgentSessionLimit.Choices.Select(days => (days, AgentSessionLimit.Label(days))),
+                    AgentSessionLimit.Days(OpenClickyConfiguration.Settings.AgentSessionDays),
+                    AgentSessionLimit.Set)));
             case "privacy.deleteTakes":
                 return Ui.Card(Ui.Row(item.Title, item.Detail, query, Ui.Button("Delete History…", DeleteHistory, WpfUi.ControlAppearance.Danger)));
             case "privacy.whereHistory":

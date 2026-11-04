@@ -82,6 +82,9 @@ struct OpenClickyShellSettings: Codable {
     /// The Mac voice picked in Settings (an AVSpeechSynthesisVoice identifier); nil → the best one
     /// installed for the reply language.
     var macVoiceIdentifier: String? = nil
+    /// How many days an agent task and its screenshots stay on this Mac; 0 keeps them, nil is the
+    /// default (AgentSessionLimit).
+    var agentSessionDays: Int? = nil
 }
 
 extension OpenClickyShellSettings {
@@ -99,6 +102,7 @@ extension OpenClickyShellSettings {
         transcriptionProvider = try container.decodeIfPresent(String.self, forKey: .transcriptionProvider)
         language = try container.decodeIfPresent(String.self, forKey: .language)
         registerAsLoginItem = try container.decodeIfPresent(Bool.self, forKey: .registerAsLoginItem)
+        agentSessionDays = try container.decodeIfPresent(Int.self, forKey: .agentSessionDays)
         writableRoots = try container.decodeIfPresent([String].self, forKey: .writableRoots)
         composioMcpUrl = try container.decodeIfPresent(String.self, forKey: .composioMcpUrl)
         composioApiKey = try container.decodeIfPresent(String.self, forKey: .composioApiKey)

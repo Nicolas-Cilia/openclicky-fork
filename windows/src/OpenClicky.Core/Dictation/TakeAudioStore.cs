@@ -1,6 +1,6 @@
 // Ports Dictation/TakeAudioStore.swift: "retry failed dictations": the audio of a take that a
 // network engine could not finish is kept on this PC as a WAV, so the take can be heard again once
-// the key, the credits or the network are back. Bounded (100 takes, 1 GB); nothing is kept once a
+// the key, the credits or the network are back. Bounded (100 takes, 200 MB); nothing is kept once a
 // take succeeds or is cancelled, and nothing is kept at all when the setting is off.
 //
 // On Windows the capture side hands over PCM16 mono at 16 kHz already (the Platform layer converts
@@ -19,7 +19,7 @@ public sealed class TakeAudioStore
     /// <summary>%LOCALAPPDATA%\OpenClicky\TakeAudio</summary>
     public static string DefaultDirectoryPath => Path.Combine(OpenClickyPaths.AppDataDirectory, "TakeAudio");
     public const int MaxRetainedTakes = 100;
-    public const long MaxRetainedBytes = 1_000_000_000;
+    public const long MaxRetainedBytes = 200_000_000;
     /// <summary>A take longer than this is cut off in memory (ten minutes of 16 kHz PCM16 is 19 MB).</summary>
     public const int MaxCaptureBytes = 16_000 * 2 * 600;
 

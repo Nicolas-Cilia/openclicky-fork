@@ -99,6 +99,11 @@ public sealed record OpenClickyThreadDetail(OpenClickyThreadSummary Thread, IRea
     }
 
     /// <summary>Decodes `threads list --json` (an array; entries without an id are skipped).</summary>
+    public static IReadOnlyList<string> DecodeDeleted(string json) =>
+        JsonNode.Parse(json)?["deleted"] is JsonArray deleted
+            ? deleted.Select(id => id?.GetValue<string>()).OfType<string>().ToList()
+            : [];
+
     public static IReadOnlyList<OpenClickyThreadSummary> DecodeList(string json) =>
         AgentJson.Parse(json) is JsonArray array
             ? array.Select(OpenClickyThreadSummary.From).OfType<OpenClickyThreadSummary>().ToList()
@@ -284,15 +289,33 @@ public sealed class OpenClickyAgentClient
     /// Full agent run on a (possibly resumed) Codex thread. The screenshot is attached as image
     /// context. <paramref name="onEvent"/> gets each progress line on a background thread.
     /// </summary>
-    public Task<OpenClickyAgentRunResult> RunAgentAsync(string task, string? screenshotPath, string? threadId,
-                                                        Action<string>? onEvent, CancellationToken cancellationToken = default) =>
-        ExecuteAsync(RunAgentArguments(task, screenshotPath, threadId), onEvent, cancellationToken);
+    public async Task<OpenClickyAgentRunResult> RunAgentAsync(string task, string? screenshotPath, string? threadId,
+                                                              Action<string>? onEvent, CancellationToken cancellationToken = default)
+    {
+        // A task on an own key doesn't touch the plan's limits.
+        var finishMeasuring = ProviderCapabilities.Current().HasOwnOpenAIKey ? null : PlanLimitStore.Shared.BeginCodexRequest();
+        try
+        {
+            return await ExecuteAsync(RunAgentArguments(task, screenshotPath, threadId), onEvent, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            finishMeasuring?.Invoke();
+        }
+    }
 
     /// <summary>Recent Codex threads (newest first) for the Agents tab.</summary>
     public async Task<IReadOnlyList<OpenClickyThreadSummary>> ListThreadsAsync(int limit = 30, CancellationToken cancellationToken = default)
     {
         var output = await CaptureStandardOutputAsync(["threads", "list", "--limit", limit.ToString(CultureInfo.InvariantCulture), "--json"], cancellationToken).ConfigureAwait(false);
         return OpenClickyThreadDetail.DecodeList(output);
+    }
+
+    /// <summary>Deletes threads untouched for this many days, and returns their ids.</summary>
+    public async Task<IReadOnlyList<string>> PruneThreadsAsync(int olderThanDays, CancellationToken cancellationToken = default)
+    {
+        var output = await CaptureStandardOutputAsync(["threads", "prune", "--older-than-days", olderThanDays.ToString(CultureInfo.InvariantCulture), "--json"], cancellationToken).ConfigureAwait(false);
+        return OpenClickyThreadDetail.DecodeDeleted(output);
     }
 
     /// <summary>Full turn history of one thread.</summary>

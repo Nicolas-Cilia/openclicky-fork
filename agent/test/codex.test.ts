@@ -8,7 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CodexAgent, buildChildEnv, addTokenUsage } from "../src/codex.js";
+import { CodexAgent, buildChildEnv, addTokenUsage, threadsPastLimit } from "../src/codex.js";
 import { resolveConfig } from "../src/config.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -113,5 +113,24 @@ describe("addTokenUsage", () => {
     const one = addTokenUsage(undefined, { inputTokens: 10, cachedInputTokens: 4, outputTokens: 2 });
     expect(addTokenUsage(one, { inputTokens: 5, cachedInputTokens: 1, outputTokens: 3 })).toEqual({ inputTokens: 15, cachedInputTokens: 5, outputTokens: 5 });
     expect(addTokenUsage(undefined, undefined)).toBeUndefined();
+  });
+});
+
+describe("threadsPastLimit", () => {
+  const now = Date.UTC(2026, 10, 30);
+  const daysAgo = (d: number) => now / 1000 - d * 86_400;
+  it("picks threads last touched before the limit", () => {
+    const threads = [{ id: "new", updatedAt: daysAgo(13) }, { id: "old", updatedAt: daysAgo(15) }, { id: "edge", updatedAt: daysAgo(14) }];
+    expect(threadsPastLimit(threads, 14, now)).toEqual(["old"]);
+  });
+  it("goes by the last touch, not the start", () => {
+    expect(threadsPastLimit([{ id: "resumed", createdAt: daysAgo(99), updatedAt: daysAgo(1) }], 14, now)).toEqual([]);
+    expect(threadsPastLimit([{ id: "only-created", createdAt: daysAgo(99) }], 14, now)).toEqual(["only-created"]);
+  });
+  it("never picks a running thread or one with no dates", () => {
+    expect(threadsPastLimit([{ id: "running", updatedAt: daysAgo(99), status: { type: "active" } }, { id: "undated" }], 14, now)).toEqual([]);
+  });
+  it("keeps everything at zero", () => {
+    expect(threadsPastLimit([{ id: "old", updatedAt: daysAgo(999) }], 0, now)).toEqual([]);
   });
 });

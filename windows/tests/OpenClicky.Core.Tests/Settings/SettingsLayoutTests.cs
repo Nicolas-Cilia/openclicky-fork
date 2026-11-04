@@ -33,6 +33,16 @@ public sealed class SettingsLayoutTests
         }
     }
 
+    /// <summary>A row the table doesn't name is never drawn, and nothing else says so.</summary>
+    [Fact]
+    public void TheUsageAndAgentTaskRowsAreOnTheirPages()
+    {
+        var arranged = SettingsLayout.Arrange([Item("keys.usage.claudeCodePlan"), Item("keys.usage.codexPlan"), Item("privacy.agentSessions")]);
+        Assert.Equal(["keys.usage.claudeCodePlan", "keys.usage.codexPlan", "privacy.agentSessions"], arranged.Select(item => item.Id));
+        Assert.Equal([DictationSettingsPage.Keys, DictationSettingsPage.Keys, DictationSettingsPage.Privacy], arranged.Select(item => item.Page));
+        Assert.All(arranged, item => Assert.True(item.ShowsOnPage && !item.IsAdvanced));
+    }
+
     [Fact]
     public void ArrangingPlacesRowsInLayoutOrderAndDropsUnplacedOnes()
     {

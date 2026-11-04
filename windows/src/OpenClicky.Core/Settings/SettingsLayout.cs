@@ -72,7 +72,7 @@ public static class SettingsLayout
         new(DictationSettingsPage.Privacy, "Permissions", ["privacy.microphone", "calendar.access"]),
         new(DictationSettingsPage.Privacy, "Your screen", ["privacy.readNearbyText", "privacy.pauseBeforeSendingScreen"]),
         new(DictationSettingsPage.Privacy, "What it keeps",
-            ["privacy.memoryOnThisMac", "privacy.clipboardHistory", "privacy.retryFailedTakes", "privacy.deleteTakes", "privacy.summary"]),
+            ["privacy.memoryOnThisMac", "privacy.clipboardHistory", "privacy.retryFailedTakes", "privacy.agentSessions", "privacy.deleteTakes", "privacy.summary"]),
         // Incognito's switch is in the sidebar's foot; search still finds it here.
         new(DictationSettingsPage.Privacy, "Sidebar", ["privacy.incognito"]) { ShowsOnPage = false },
         new(DictationSettingsPage.Privacy, "Where things live", ["privacy.whereHistory", "privacy.whereSpace", "privacy.whereKeys"]) { IsAdvanced = true },
