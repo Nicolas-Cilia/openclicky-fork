@@ -27,8 +27,8 @@ fi
 # How the Mac build was signed is only known to release.sh, which wrote it on the page.
 BODY="$(gh release view "$TAG" --repo "$REPO" --json body --jq .body)"
 MAC_SIGNING="notarized"
-if grep -q "Signed for development only" <<<"$BODY"; then
-  MAC_SIGNING="development"
+if grep -qE "Self-signed|Signed for development only" <<<"$BODY"; then
+  MAC_SIGNING="self-signed"
 elif grep -q "Signed with Developer ID, not notarized" <<<"$BODY"; then
   MAC_SIGNING="developer-id"
 fi

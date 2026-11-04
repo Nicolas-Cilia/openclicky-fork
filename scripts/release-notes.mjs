@@ -4,7 +4,7 @@
 //   node scripts/release-notes.mjs check <version>                      exit 1 (with a message) when the section is missing or empty
 //   node scripts/release-notes.mjs markdown <version> [--platform mac]  the bullets one platform's users get (all platforms + theirs)
 //   node scripts/release-notes.mjs html <version> [--platform mac]      the same as a small HTML page for the Sparkle update dialog
-//   node scripts/release-notes.mjs github <version> --platforms mac,windows [--mac-signing notarized|developer-id|development]
+//   node scripts/release-notes.mjs github <version> --platforms mac,windows [--mac-signing notarized|developer-id|self-signed]
 //                                       [--repo owner/name] [--ref v0.10.0] [--windows-signed]
 //                                                                        the GitHub release page: what's new by platform, then downloads
 //                                                                        (build number and commit are --ref's, default HEAD)
@@ -135,7 +135,7 @@ ${toHtml(markdown)}
 const MAC_SIGNING = {
   notarized: "Signed with Developer ID and notarized by Apple.",
   "developer-id": "Signed with Developer ID, not notarized: right-click the app → Open the first time.",
-  development: "Signed for development only: on another Mac, right-click the app → Open the first time.",
+  "self-signed": "Self-signed, so macOS blocks it the first time: open System Settings → Privacy & Security and click **Open Anyway**, or use the [Terminal install](README).",
 };
 
 // The GitHub release body. `platforms` are the ones whose files are attached to the release; the
@@ -158,7 +158,7 @@ export function githubBody(section, { version, platforms, repo, build, commit, m
     : "Not code-signed yet: if SmartScreen warns, choose *More info* → *Run anyway*. Updates itself.";
   const rows = [];
   if (shipped.includes("mac")) {
-    rows.push(`| macOS 14.2 or later, Apple silicon or Intel | ${download(`OpenClicky-${version}.dmg`)} | ${MAC_SIGNING[macSigning]} Open the dmg and click **Move to Applications**. Updates itself. |`);
+    rows.push(`| macOS 14.2 or later, Apple silicon or Intel | ${download(`OpenClicky-${version}.dmg`)} | ${MAC_SIGNING[macSigning].replace("(README)", `(https://github.com/${repo}#install)`)} Open the dmg and drag the app to Applications. Updates itself. |`);
   }
   if (shipped.includes("windows")) {
     rows.push(`| Windows 10 (2004 or later) or 11, x64 | ${download("OpenClicky.Windows-win-Setup.exe")} | ${windowsNote} |`);

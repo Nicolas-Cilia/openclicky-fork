@@ -28,9 +28,27 @@ These links always give you the newest version:
 - **[Download for Mac](https://github.com/Nicolas-Cilia/openclicky-fork/releases/latest/download/OpenClicky.dmg)** (macOS 14.2 or later)
 - **[Download for Windows](https://github.com/Nicolas-Cilia/openclicky-fork/releases/latest/download/OpenClicky-Setup.exe)** (Windows 10 version 2004 or later, or 11; for ARM PCs use the [ARM64 installer](https://github.com/Nicolas-Cilia/openclicky-fork/releases/latest/download/OpenClicky-Setup-arm64.exe))
 
-**Mac:** open the dmg and drag the app to Applications. It is self-signed rather than notarized, so the
-first time on each Mac you need to right-click it and choose Open (on newer macOS: System Settings →
-Privacy & Security → Open Anyway).
+**Mac, in Terminal:** the quickest way, with no warning to get past. This paste installs the newest
+version and opens it:
+
+```bash
+curl -fsSL https://github.com/Nicolas-Cilia/openclicky-fork/releases/latest/download/install-mac.sh | bash
+```
+
+macOS doesn't run its usual check on apps installed this way, so use it only if you trust this project.
+The script does check that the app is signed with OpenClicky's certificate before installing it.
+[Read the script](scripts/install-mac.sh) first if you'd like.
+
+**Mac, with the download:** open the dmg and drag the app to Applications. OpenClicky is self-signed
+rather than notarized by Apple, so the first time you open it, macOS says it "could not verify"
+OpenClicky. To open it:
+
+1. Click **Done** on that message.
+2. Open **System Settings → Privacy & Security** and scroll down to **Security**.
+3. Next to the message about OpenClicky, click **Open Anyway**.
+4. Click **Open Anyway** again, then enter your password or use Touch ID.
+
+You only do this once on each Mac. On macOS 14, you can instead right-click the app and choose Open.
 
 **Windows:** run the installer. It is unsigned, so SmartScreen warns the first time: choose More info →
 Run anyway.

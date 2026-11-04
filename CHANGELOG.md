@@ -29,6 +29,7 @@ downloads table. Under a platform heading, don't start bullets with "Windows:" a
 
 ### Mac
 
+- **Install from Terminal.** One command installs the newest version, with no security warning to get past. The README has it, along with the steps for opening a normal download.
 - **Much lighter when idle.** OpenClicky no longer animates hidden indicators in the background, so it uses far less CPU and memory while you aren't talking to it.
 - **Shares the notch.** The new Automatic placement moves the island to the right edge while another app, such as Vorssaint, is using the notch.
 

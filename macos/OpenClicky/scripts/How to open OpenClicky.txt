@@ -1,0 +1,11 @@
+How to open OpenClicky
+
+1. Drag OpenClicky to the Applications folder, then open it.
+2. macOS says it "could not verify" OpenClicky, because the app is self-signed
+   rather than notarized by Apple. Click Done.
+3. Open System Settings, then Privacy & Security, and scroll down to Security.
+4. Next to the message about OpenClicky, click Open Anyway.
+5. Click Open Anyway again, then enter your password or use Touch ID.
+
+You only do this once on each Mac.
+On macOS 14, you can instead right-click the app and choose Open.
