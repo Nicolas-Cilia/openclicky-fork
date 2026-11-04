@@ -151,9 +151,9 @@ final class NotchHUDModel: ObservableObject {
     @Published private(set) var isSettlingGracefully = false
     var tourWidth: CGFloat { placement.isSideDrawer ? 360 : 512 }
     var tourHeight: CGFloat {
-        // A side drawer is narrower, so the copy wraps onto more lines.
+        // A side drawer is narrower: the words wrap onto more lines, and the buttons sit under them.
         let statusRoom: CGFloat = (tourCard?.status == nil ? 0 : 38) + (tourCard?.microphoneName == nil ? 0 : 20)
-        return cardTopInset + (placement.isSideDrawer ? 168 : 116) + statusRoom
+        return cardTopInset + (placement.isSideDrawer ? 196 : 116) + statusRoom
     }
 
     /// Text typed out in the compact strip (the goodbye on quit); nil = none.
@@ -1536,7 +1536,7 @@ struct NotchHUDView: View {
                 }
             case .tour:
                 if let tourCard = model.tourCard {
-                    FirstRunTourCardView(card: tourCard, controller: companionManager.firstRunTour, topInset: model.cardTopInset)
+                    FirstRunTourCardView(card: tourCard, controller: companionManager.firstRunTour, topInset: model.cardTopInset, isStacked: model.placement.isSideDrawer)
                         .frame(width: model.tourWidth, height: model.tourHeight)
                         .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .top)))
                 }

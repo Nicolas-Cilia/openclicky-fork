@@ -241,7 +241,7 @@ public sealed partial class CompanionManager
     private async Task SayHelloLaterAsync()
     {
         await Task.Delay(TimeSpan.FromSeconds(1.6));
-        Overlay.StreamCursorCaption("hi! i’m clicky. i follow your pointer, and point at things when you ask.", holdSeconds: 6);
+        Overlay.StreamCursorCaption("hi! i’m clicky. i show up when you talk to me, and point at things when you ask.", holdSeconds: 6);
         // "Hi! I'm Clicky. Let me show you three quick things.", recorded and bundled.
         RecordedVoice.Play(Speech.RecordedVoice.Line.TourHello);
     }

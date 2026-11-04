@@ -72,7 +72,7 @@ public sealed partial class OverlayModel : ObservableObject
     /// <summary>Whether the overlay windows are up.</summary>
     [ObservableProperty] private bool isOverlayVisible;
     /// <summary>"Show OpenClicky": off means transient mode (shown for an interaction, then faded out).</summary>
-    [ObservableProperty] private bool isClickyCursorEnabled = true;
+    [ObservableProperty] private bool isClickyCursorEnabled;
 
     /// <summary>False until the first overlay was shown: only that one types the welcome bubble.</summary>
     public bool HasShownOverlayBefore { get; set; }
@@ -115,7 +115,7 @@ public sealed partial class OverlayModel : ObservableObject
         this.preferences = preferences;
         if (preferences is not null)
         {
-            isClickyCursorEnabled = preferences.GetOptionalBool(CursorEnabledPreferenceKey) ?? true;
+            isClickyCursorEnabled = preferences.GetOptionalBool(CursorEnabledPreferenceKey) ?? false;
         }
     }
 

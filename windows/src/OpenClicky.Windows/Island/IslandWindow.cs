@@ -182,7 +182,7 @@ public sealed class IslandWindow : Window
             IslandExpansion.Composer => new ComposerView(hub),
             IslandExpansion.Connect when model.ConnectPrompt is { } connectPrompt => new ConnectCardView(hub, connectPrompt, topInset, IslandLayout.ConnectWidth),
             IslandExpansion.Permission when model.PermissionPrompt is { } permissionPrompt => new PermissionCardView(hub, permissionPrompt, topInset),
-            IslandExpansion.Tour when model.TourCard is { } tourCard => new TourCardView(hub, tourCard, topInset),
+            IslandExpansion.Tour when model.TourCard is { } tourCard => new TourCardView(hub, tourCard, topInset, model.Placement.IsSideDrawer()),
             IslandExpansion.Full => new FullPanelView(hub, model),
             IslandExpansion.Peek => new PeekLineView(hub, model.Geometry.NotchHeight, isSideways: model.Layout.State.PeekGrowsSideways),
             _ => new CollapsedHandleView(model.Placement),

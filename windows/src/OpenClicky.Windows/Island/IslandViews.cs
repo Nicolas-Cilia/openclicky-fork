@@ -656,7 +656,7 @@ internal sealed class TourCardView : Grid, IIslandContent
     private readonly IslandCompanionModel hub;
     private readonly TourKeycapsView? keycaps;
 
-    public TourCardView(IslandCompanionModel hub, FirstRunTourCard card, double topInset)
+    public TourCardView(IslandCompanionModel hub, FirstRunTourCard card, double topInset, bool isStacked = false)
     {
         this.hub = hub;
         Margin = new Thickness(DS.HUD.BodySidePadding, topInset + 12, DS.HUD.BodySidePadding, 14);
@@ -685,11 +685,14 @@ internal sealed class TourCardView : Grid, IIslandContent
         ColumnDefinitions[0].Width = new GridLength(84 + 14);
 
         var copy = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        copy.Children.Add(Text(card.Title, 15, DS.HUD.TextBrush, FontWeights.SemiBold, DS.Fonts.Display, TextTrimming.CharacterEllipsis));
-        var detail = Text(card.Detail, 12, DS.HUD.Text2Brush, wrapping: TextWrapping.Wrap, trimming: TextTrimming.CharacterEllipsis);
+        // A side drawer has no width for three columns: the words wrap in full, and the buttons go under them.
+        copy.Children.Add(isStacked
+            ? Text(card.Title, 15, DS.HUD.TextBrush, FontWeights.SemiBold, DS.Fonts.Display, wrapping: TextWrapping.Wrap)
+            : Text(card.Title, 15, DS.HUD.TextBrush, FontWeights.SemiBold, DS.Fonts.Display, TextTrimming.CharacterEllipsis));
+        var detail = Text(card.Detail, 12, DS.Brush(Colors.White, 0.82), wrapping: TextWrapping.Wrap, trimming: TextTrimming.CharacterEllipsis);
         detail.Margin = new Thickness(0, 3, 0, 0);
         detail.LineHeight = 16;
-        detail.MaxHeight = 16 * 3 + 1;
+        if (!isStacked) detail.MaxHeight = 16 * 3 + 1;
         copy.Children.Add(detail);
         if (card.Status is { } status)
         {
@@ -727,14 +730,37 @@ internal sealed class TourCardView : Grid, IIslandContent
         Children.Add(copy);
 
         var buttons = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 0, 0) };
+        var quiet = QuietButton(card.SecondaryTitle, () => hub.TourSecondaryCommand.Execute(null));
+        if (isStacked)
+        {
+            buttons.Orientation = Orientation.Horizontal;
+            buttons.HorizontalAlignment = HorizontalAlignment.Right;
+            buttons.Margin = new Thickness(0, 10, 0, 0);
+            quiet.Margin = new Thickness(0, 0, 8, 0);
+            buttons.Children.Add(quiet);
+        }
         if (card.PrimaryTitle is { } primaryTitle)
         {
             var primary = PrimaryButton(primaryTitle, () => hub.TourPrimaryCommand.Execute(null));
-            primary.Margin = new Thickness(0, 0, 0, 6);
+            if (!isStacked) primary.Margin = new Thickness(0, 0, 0, 6);
             buttons.Children.Add(primary);
         }
-        buttons.Children.Add(QuietButton(card.SecondaryTitle, () => hub.TourSecondaryCommand.Execute(null)));
-        SetColumn(buttons, 2);
+        if (!isStacked) buttons.Children.Add(quiet);
+        if (isStacked)
+        {
+            RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            illustrationHost.VerticalAlignment = VerticalAlignment.Top;
+            copy.VerticalAlignment = VerticalAlignment.Top;
+            SetRow(buttons, 1);
+            SetColumn(buttons, 0);
+            SetColumnSpan(buttons, 2);
+            ColumnDefinitions.RemoveAt(2);
+        }
+        else
+        {
+            SetColumn(buttons, 2);
+        }
         Children.Add(buttons);
     }
 

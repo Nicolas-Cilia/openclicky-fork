@@ -755,10 +755,10 @@ final class CompanionManager: ObservableObject {
     }
 
     /// User preference for whether the OpenClicky cursor should be shown.
-    /// When toggled off, the overlay is hidden and push-to-talk is disabled.
+    /// Off ("while I talk", the default), the pointer shows only during a conversation or a flight.
     /// Persisted to UserDefaults so the choice survives app restarts.
     @Published var isClickyCursorEnabled: Bool = UserDefaults.standard.object(forKey: "isClickyCursorEnabled") == nil
-        ? true
+        ? false
         : UserDefaults.standard.bool(forKey: "isClickyCursorEnabled")
 
     func setClickyCursorEnabled(_ enabled: Bool) {
@@ -807,7 +807,7 @@ final class CompanionManager: ObservableObject {
     private func hidePointerUntilShakeOnceItIsFamiliar() {
         let useCount = UserDefaults.standard.integer(forKey: FirstRunTourController.useCountKey)
         let personChoseOne = UserDefaults.standard.string(forKey: "openClickyPointerPresence") != nil
-        guard let newPresence = PointerPresenceDefault.presenceToSwitchTo(
+        guard isClickyCursorEnabled, let newPresence = PointerPresenceDefault.presenceToSwitchTo(
             useCount: useCount, personChoseOne: personChoseOne, current: pointerPresence) else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
             guard let self, self.voiceState == .idle, self.pointerPresence == .always,
@@ -1389,7 +1389,7 @@ final class CompanionManager: ObservableObject {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
             guard let self else { return }
-            self.streamCursorCaption("hi! i’m clicky. i follow your pointer, and point at things when you ask.", holdSeconds: 6)
+            self.streamCursorCaption("hi! i’m clicky. i show up when you talk to me, and point at things when you ask.", holdSeconds: 6)
             // "Hi! I'm Clicky. Let me show you three quick things.", recorded and bundled.
             self.recordedVoice.play(.tourHello)
         }
@@ -2532,6 +2532,11 @@ let nsError = failure.underlyingError as NSError
     /// waits for TTS playback and any pointing animation to finish, then
     /// fades out the overlay after a 1-second pause. Cancelled automatically
     /// if the user starts another push-to-talk interaction.
+    /// The tour brought the pointer out to introduce it; on "while I talk" it leaves again now.
+    func hidePointerAfterTourIfNeeded() {
+        scheduleTransientHideIfNeeded()
+    }
+
     private func scheduleTransientHideIfNeeded() {
         guard !isClickyCursorEnabled && isOverlayVisible else { return }
 

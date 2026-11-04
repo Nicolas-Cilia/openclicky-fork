@@ -10,6 +10,7 @@
 //
 
 using CommunityToolkit.Mvvm.ComponentModel;
+using OpenClicky.Core.Pointing;
 using OpenClicky.Core.Shortcuts;
 
 namespace OpenClicky.Core.Companion;
@@ -138,7 +139,8 @@ public sealed record FirstRunTourCardInputs(
     bool StatusIsGood = false,
     string? MicrophoneName = null,
     bool OffersMicrophoneChange = false,
-    bool SuggestsBuiltInMicrophone = false);
+    bool SuggestsBuiltInMicrophone = false,
+    HUDPlacement Placement = HUDPlacement.Notch);
 
 /// <summary>The tour's cards, worded as on the Mac with the Windows keys and names ("right ctrl + windows", "this pc", the
 /// island at the top). The Mac's speech-recognition and "free fn" cards have no Windows counterpart.</summary>
@@ -186,7 +188,7 @@ public static class FirstRunTourCards
                     inputs.CanAsk ? "next" : "connect", "skip");
             case FirstRunTourStep.Done:
                 return new FirstRunTourCard(step, "you’re all set",
-                    "hover the island at the top any time. keys, microphone and the rest live in settings.",
+                    $"{inputs.Placement.ReachSentence()} keys, microphone and the rest live in settings.",
                     none, TourSymbols.Checkmark, null, false, null, false, "open settings", "done");
             default:
                 return new FirstRunTourCard(step, "open me when your pc starts?",

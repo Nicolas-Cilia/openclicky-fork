@@ -25,6 +25,7 @@ downloads table. Under a platform heading, don't start bullets with "Windows:" a
 - **Updates come from this fork.**
 - **Agent tasks work without any setup beyond signing in to Codex.** The tool they use now comes with the app. If your computer has no Node.js, the app downloads it once when you have agent tasks set up.
 - **A more natural voice on offer.** The first-run tour offers Kokoro, a free voice that runs on your computer. It only downloads if you say yes.
+- **The pointer stays out of the way.** It now shows only while you talk to Clicky. Choose Always, or another option, in Settings → Clicky.
 - **Keeps less on your computer.** Agent tasks and the screenshots saved with them are deleted after 14 days. Choose 7, 30 or 90 days, or Forever, in Settings → Privacy. Failed dictation audio now stops at 200 MB, and deleting a take deletes its audio.
 
 ### Mac

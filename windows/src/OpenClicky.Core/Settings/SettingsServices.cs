@@ -219,7 +219,7 @@ public interface ISettingsServices
 public sealed class DetachedCompanionSettings : ObservableObject, ICompanionSettings
 {
     private readonly Preferences preferences;
-    private bool isClickyCursorEnabled = true;
+    private bool isClickyCursorEnabled = false;
     private PointerPresence pointerPresence = PointerPresence.Always;
     private bool isAgentModeEnabled;
     private string selectedModel = "claude-sonnet-4-6";

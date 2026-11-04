@@ -319,6 +319,10 @@ final class FirstRunTourController: ObservableObject {
         }
     }
 
+    /// Where the island really is now: Automatic has already been resolved to the notch or an edge.
+    private var hudPlacement: HUDPlacement { companionManager?.notchHUDManager.placement ?? .notch }
+    private static var anyScreenHasNotch: Bool { NSScreen.screens.contains { $0.safeAreaInsets.top > 0 } }
+
     /// Offered once, near the end of the tour: only to someone still on this Mac's own voice, and
     /// nothing downloads until they say yes.
     nonisolated static func offersNaturalVoice(kokoroInstalled: Bool, speakingVoice: SpeechVoiceChoice, kokoroSpeaksLanguage: Bool) -> Bool {
@@ -364,7 +368,8 @@ final class FirstRunTourController: ObservableObject {
         case .voice:
             break
         case .done:
-            companionManager?.recordedVoice.play(.tourDone)
+            // The recording says to hover the notch, which is wrong anywhere else.
+            if hudPlacement.isAtTheNotch(hasHardwareNotch: Self.anyScreenHasNotch) { companionManager?.recordedVoice.play(.tourDone) }
         case .openAtLogin:
             break
         }
@@ -421,6 +426,7 @@ final class FirstRunTourController: ObservableObject {
         defaults.removeObject(forKey: Self.stepKey)
         companionManager?.dictationSettings.hasCompletedDictationOnboarding = true
         publish()
+        companionManager?.hidePointerAfterTourIfNeeded()
         // Setup is done: the models can download in the background now.
         companionManager?.startAutomaticModelDownloads(tourIsFinished: true)
     }
@@ -575,7 +581,7 @@ final class FirstRunTourController: ObservableObject {
         case .done:
             return FirstRunTourCard(
                 step: .done, title: "you’re all set",
-                detail: "hover the notch any time. keys, microphone and the rest live in settings.",
+                detail: "\(hudPlacement.reachSentence(hasHardwareNotch: Self.anyScreenHasNotch)) keys, microphone and the rest live in settings.",
                 symbol: "checkmark.circle.fill",
                 primaryTitle: "open settings", secondaryTitle: "done")
         case .openAtLogin:
@@ -608,85 +614,113 @@ struct FirstRunTourCardView: View {
     let card: FirstRunTourCard
     @ObservedObject var controller: FirstRunTourController
     var topInset: CGFloat = 0
+    /// A side drawer has no width for three columns: the buttons go under the words, and the words wrap in full.
+    var isStacked = false
 
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
-            illustration
-                .frame(width: 84, height: 56)
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(card.title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(DS.HUD.text)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                Text(card.detail)
-                    .font(.system(size: 12))
-                    .foregroundColor(DS.HUD.text2)
-                    .lineSpacing(1)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let status = card.status {
-                    Text(status)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(card.statusIsGood ? Color(red: 0.4, green: 0.85, blue: 0.5) : DS.HUD.pointer)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 2)
-                }
-                if let microphoneName = card.microphoneName {
-                    Button(action: { controller.changeMicrophone() }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "mic.fill").font(.system(size: 10))
-                            Text("listening through \(microphoneName) ·").lineLimit(1)
-                            Text("change").underline()
-                        }
-                        .font(.system(size: 12, weight: card.microphoneNeedsAttention ? .semibold : .regular))
-                        .foregroundColor(card.microphoneNeedsAttention ? DS.HUD.text : DS.HUD.text3)
-                        .contentShape(Rectangle())
+        Group {
+            if isStacked {
+                VStack(alignment: .trailing, spacing: 10) {
+                    HStack(alignment: .top, spacing: 12) {
+                        illustration
+                            .frame(width: card.keys.isEmpty ? 56 : 84, height: 56)
+                            .accessibilityHidden(true)
+                        words
                     }
-                    .buttonStyle(.plain)
-                    .pointerCursor()
-                    .padding(.top, 2)
+                    HStack(spacing: 8) { buttons }
                 }
-                if let practiceIndex = card.step.practiceIndex {
-                    progressDashes(current: practiceIndex).padding(.top, 5)
+            } else {
+                HStack(alignment: .center, spacing: 14) {
+                    illustration
+                        .frame(width: 84, height: 56)
+                        .accessibilityHidden(true)
+                    words
+                    VStack(spacing: 6) { buttons }
+                        .fixedSize()
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            VStack(spacing: 6) {
-                if let primaryTitle = card.primaryTitle {
-                    Button(action: { controller.primaryAction() }) {
-                        Text(primaryTitle)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.black)
-                            .padding(.horizontal, 14)
-                            .frame(minWidth: 72)
-                            .frame(height: 30)
-                            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(DS.HUD.pointer))
-                    }
-                    .buttonStyle(.plain)
-                    .pointerCursor()
-                }
-                Button(action: { controller.secondaryAction() }) {
-                    Text(card.secondaryTitle)
-                        .font(.system(size: 12))
-                        .foregroundColor(DS.HUD.text2)
-                        .frame(minWidth: 72)
-                        .frame(height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .pointerCursor()
-            }
-            .fixedSize()
         }
         .padding(.top, topInset + 12)
         .padding(.horizontal, DS.HUD.bodySidePadding)
         .padding(.bottom, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var words: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(card.title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(DS.HUD.text)
+                .lineLimit(isStacked ? nil : 1)
+                .minimumScaleFactor(isStacked ? 1 : 0.85)
+                .fixedSize(horizontal: false, vertical: isStacked)
+            Text(card.detail)
+                .font(.system(size: 12))
+                .foregroundColor(DS.HUD.text.opacity(0.82))
+                .lineSpacing(1)
+                .lineLimit(isStacked ? nil : 3)
+                .fixedSize(horizontal: false, vertical: true)
+            if let status = card.status {
+                Text(status)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(card.statusIsGood ? Color(red: 0.4, green: 0.85, blue: 0.5) : DS.HUD.pointer)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 2)
+            }
+            if let microphoneName = card.microphoneName {
+                Button(action: { controller.changeMicrophone() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "mic.fill").font(.system(size: 10))
+                        Text("listening through \(microphoneName) ·").lineLimit(1)
+                        Text("change").underline()
+                    }
+                    .font(.system(size: 12, weight: card.microphoneNeedsAttention ? .semibold : .regular))
+                    .foregroundColor(card.microphoneNeedsAttention ? DS.HUD.text : DS.HUD.text3)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+                .padding(.top, 2)
+            }
+            if let practiceIndex = card.step.practiceIndex {
+                progressDashes(current: practiceIndex).padding(.top, 5)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Stacked, the quiet one comes first so the main one sits at the end of the row.
+    @ViewBuilder
+    private var buttons: some View {
+        if isStacked { secondaryButton }
+        if let primaryTitle = card.primaryTitle {
+            Button(action: { controller.primaryAction() }) {
+                Text(primaryTitle)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 14)
+                    .frame(minWidth: 72)
+                    .frame(height: 30)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(DS.HUD.pointer))
+            }
+            .buttonStyle(.plain)
+            .pointerCursor()
+        }
+        if !isStacked { secondaryButton }
+    }
+
+    private var secondaryButton: some View {
+        Button(action: { controller.secondaryAction() }) {
+            Text(card.secondaryTitle)
+                .font(.system(size: 12))
+                .foregroundColor(DS.HUD.text.opacity(0.82))
+                .frame(minWidth: 72)
+                .frame(height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
     }
 
     @ViewBuilder
