@@ -1,4 +1,4 @@
-// Ports AppRegionTests.swift (the parts in Configuration), DeviceIdentityTests.swift, and covers
+// Ports AppRegionTests.swift (the parts in Configuration), and covers
 // ReplyLanguage, OpenClickyPaths and AppLog.
 
 using OpenClicky.Core.Configuration;
@@ -31,27 +31,6 @@ public sealed class AppRegionTests
         Assert.Equal("india", AppRegion.India.RawValue());
         Assert.Equal(AppRegion.World, RawValues.FromRawValue<AppRegion>("world"));
         Assert.Equal("Rest of the world", AppRegion.World.Title());
-    }
-}
-
-public sealed class DeviceIdentityTests
-{
-    [Fact]
-    public void TheHashIsSaltedSha256InLowercaseHex()
-    {
-        // printf 'openclicky-device-v1:ABC' | shasum -a 256
-        Assert.Equal("09dfa12193ca778d98a1c1d3b219ba1f2e98a5d1fe755d048e0b1b4f8faff226", DeviceIdentity.Hash("ABC"));
-    }
-
-    [Fact]
-    public void ThisPcHasAStable64CharacterHash()
-    {
-        if (!OperatingSystem.IsWindows()) return;
-        var first = DeviceIdentity.Current;
-        Assert.NotNull(first);
-        Assert.Equal(64, first!.Length);
-        Assert.All(first, character => Assert.Contains(character, "0123456789abcdef"));
-        Assert.Equal(first, DeviceIdentity.Current);
     }
 }
 

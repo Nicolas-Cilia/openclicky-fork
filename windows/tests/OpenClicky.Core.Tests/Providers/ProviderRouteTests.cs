@@ -1,5 +1,5 @@
-// Ports ProviderRouteTests.swift: every capability × own key / account / neither, the direct
-// requests (shaped like the backend's own-key path), and the 401 rule for a PC with no account.
+// Ports ProviderRouteTests.swift: every capability × own key / plan / neither, and the direct
+// requests.
 // Nothing here reads shell.json or any file.
 
 using System.Net;
@@ -11,12 +11,10 @@ namespace OpenClicky.Core.Tests.Providers;
 
 public sealed class ProviderRouteTests
 {
-    private static readonly ProviderCredentials OpenAIOnly = new("sk-user", null, null);
-    private static readonly ProviderCredentials AnthropicOnly = new(null, "ak-user", null);
-    private static readonly ProviderCredentials BothKeys = new("sk-user", "ak-user", null);
-    private static readonly ProviderCredentials AccountOnly = new(null, null, "tok");
-    private static readonly ProviderCredentials OpenAIAndAccount = new("sk-user", null, "tok");
-    private static readonly ProviderCredentials Nothing = new(" ", "", "\n");
+    private static readonly ProviderCredentials OpenAIOnly = new("sk-user", null);
+    private static readonly ProviderCredentials AnthropicOnly = new(null, "ak-user");
+    private static readonly ProviderCredentials BothKeys = new("sk-user", "ak-user");
+    private static readonly ProviderCredentials Nothing = new(" ", "");
 
     private static readonly ProviderCapability[] OpenAICapabilities =
         [ProviderCapability.OpenAIChat, ProviderCapability.Speech, ProviderCapability.Transcription, ProviderCapability.Realtime];
@@ -29,7 +27,6 @@ public sealed class ProviderRouteTests
         foreach (var capability in OpenAICapabilities)
         {
             Assert.Equal(ProviderRoute.OpenAIDirect, ProviderRouter.Route(capability, OpenAIOnly));
-            Assert.Equal(ProviderRoute.OpenAIDirect, ProviderRouter.Route(capability, OpenAIAndAccount));
         }
     }
 
@@ -41,13 +38,12 @@ public sealed class ProviderRouteTests
     }
 
     [Fact]
-    public void AnAccountCoversWhatNoOwnKeyDoes()
+    public void APlanOnlyAnswersQuestions()
     {
-        foreach (var capability in Enum.GetValues<ProviderCapability>())
-            Assert.Equal(ProviderRoute.Backend, ProviderRouter.Route(capability, AccountOnly));
-        // Signed in with an OpenAI key too: questions run on the key, not the credits.
-        Assert.Equal(ProviderRoute.AnswerProvider(AnswerSource.OpenAI), ProviderRouter.Route(ProviderCapability.Claude, OpenAIAndAccount));
-        Assert.Equal(ProviderRoute.Backend, ProviderRouter.Route(ProviderCapability.AssemblyAIStreaming, OpenAIAndAccount));
+        var plan = new ProviderCredentials(null, null, codexPlanOn: true);
+        Assert.Equal(ProviderRoute.AnswerProvider(AnswerSource.CodexPlan), ProviderRouter.Route(ProviderCapability.Claude, plan));
+        foreach (var capability in OpenAICapabilities)
+            Assert.Equal(ProviderRoute.Unavailable(ProviderRouter.NeedsOpenAIKeySentence), ProviderRouter.Route(capability, plan));
     }
 
     [Fact]
@@ -60,36 +56,31 @@ public sealed class ProviderRouteTests
         }
         Assert.Equal(ProviderRoute.Unavailable(ProviderRouter.NeedsAnthropicKeySentence), ProviderRouter.Route(ProviderCapability.Claude, Nothing));
         Assert.Equal(ProviderRoute.AnswerProvider(AnswerSource.OpenAI), ProviderRouter.Route(ProviderCapability.Claude, OpenAIOnly));
-        Assert.Equal(ProviderRoute.Unavailable(ProviderRouter.AssemblyAINeedsAccountSentence), ProviderRouter.Route(ProviderCapability.AssemblyAIStreaming, BothKeys));
     }
 
     [Fact]
     public void AutomaticAnswersWithTheFirstSourceThatCan()
     {
-        const string account = "acct";
-        Assert.Equal(ProviderRoute.AnswerProvider(AnswerSource.Gemini), ProviderRouter.Route(ProviderCapability.Claude, new(null, null, account, geminiKey: "g")));
-        Assert.Equal(ProviderRoute.AnswerProvider(AnswerSource.OpenRouter), ProviderRouter.Route(ProviderCapability.Claude, new("o", null, null, openRouterKey: "r")));
-        Assert.Equal(ProviderRoute.AnthropicDirect, ProviderRouter.Route(ProviderCapability.Claude, new(null, "a", null, openRouterKey: "r")));
-        Assert.Equal(ProviderRoute.AnswerProvider(AnswerSource.CodexPlan), ProviderRouter.Route(ProviderCapability.Claude, new(null, null, account, codexPlanOn: true)));
-        Assert.Equal(ProviderRoute.AnswerProvider(AnswerSource.ClaudeCodePlan), ProviderRouter.Route(ProviderCapability.Claude, new(null, null, null, claudeCodePlanOn: true, codexPlanOn: true)));
-        Assert.Equal(ProviderRoute.Backend, ProviderRouter.Route(ProviderCapability.Claude, new(null, null, account)));
+        Assert.Equal(ProviderRoute.AnswerProvider(AnswerSource.Gemini), ProviderRouter.Route(ProviderCapability.Claude, new(null, null, geminiKey: "g")));
+        Assert.Equal(ProviderRoute.AnswerProvider(AnswerSource.OpenRouter), ProviderRouter.Route(ProviderCapability.Claude, new("o", null, openRouterKey: "r")));
+        Assert.Equal(ProviderRoute.AnthropicDirect, ProviderRouter.Route(ProviderCapability.Claude, new(null, "a", openRouterKey: "r")));
+        Assert.Equal(ProviderRoute.AnswerProvider(AnswerSource.CodexPlan), ProviderRouter.Route(ProviderCapability.Claude, new(null, null, codexPlanOn: true)));
+        Assert.Equal(ProviderRoute.AnswerProvider(AnswerSource.ClaudeCodePlan), ProviderRouter.Route(ProviderCapability.Claude, new(null, null, claudeCodePlanOn: true, codexPlanOn: true)));
     }
 
     [Fact]
     public void APickedSourceWinsWhenItCanAnswer()
     {
         Assert.Equal(ProviderRoute.AnswerProvider(AnswerSource.Groq),
-            ProviderRouter.Route(ProviderCapability.Claude, new(null, "a", null, groqKey: "q", preferredAnswerSource: AnswerSource.Groq)));
-        Assert.Equal(ProviderRoute.Backend,
-            ProviderRouter.Route(ProviderCapability.Claude, new(null, "a", "acct", preferredAnswerSource: AnswerSource.OpenClickyAccount)));
+            ProviderRouter.Route(ProviderCapability.Claude, new(null, "a", groqKey: "q", preferredAnswerSource: AnswerSource.Groq)));
         Assert.Equal(ProviderRoute.AnthropicDirect,
-            ProviderRouter.Route(ProviderCapability.Claude, new(null, "a", null, preferredAnswerSource: AnswerSource.Mistral)));
+            ProviderRouter.Route(ProviderCapability.Claude, new(null, "a", preferredAnswerSource: AnswerSource.Mistral)));
     }
 
     [Fact]
     public void OtherKeysOnlyAnswerQuestions()
     {
-        var geminiOnly = new ProviderCredentials(null, null, null, geminiKey: "g");
+        var geminiOnly = new ProviderCredentials(null, null, geminiKey: "g");
         Assert.Equal(ProviderRoute.Unavailable(ProviderRouter.NeedsOpenAIKeySentence), ProviderRouter.Route(ProviderCapability.Speech, geminiOnly));
         Assert.Equal(ProviderRoute.Unavailable(ProviderRouter.NeedsOpenAIKeySentence), ProviderRouter.Route(ProviderCapability.OpenAIChat, geminiOnly));
     }
@@ -99,7 +90,6 @@ public sealed class ProviderRouteTests
     {
         Assert.Equal("Claude", ProviderRoute.AnthropicDirect.AnsweringSource?.ShortName());
         Assert.Equal("Claude Code", ProviderRoute.AnswerProvider(AnswerSource.ClaudeCodePlan).AnsweringSource?.ShortName());
-        Assert.Equal("free credits", ProviderRoute.Backend.AnsweringSource?.ShortName());
         Assert.Null(ProviderRoute.Unavailable("no").AnsweringSource);
         Assert.Null(ProviderRoute.OpenAIDirect.AnsweringSource);
     }
@@ -107,8 +97,8 @@ public sealed class ProviderRouteTests
     [Fact]
     public void BlankValuesCountAsMissing()
     {
-        Assert.True(Nothing.OpenAIKey is null && Nothing.AnthropicKey is null && Nothing.AccountToken is null);
-        Assert.Equal("sk-user", new ProviderCredentials(" sk-user\n", null, null).OpenAIKey);
+        Assert.True(Nothing.OpenAIKey is null && Nothing.AnthropicKey is null);
+        Assert.Equal("sk-user", new ProviderCredentials(" sk-user\n", null).OpenAIKey);
     }
 
     [Fact]
@@ -118,7 +108,9 @@ public sealed class ProviderRouteTests
         Assert.Equal("x", credentials.XaiKey);
         Assert.True(credentials.CodexPlanOn);
         Assert.Equal(AnswerSource.Xai, credentials.PreferredAnswerSource);
-        Assert.Equal([AnswerSource.Xai, AnswerSource.CodexPlan], credentials.AnswerSourcesInOrder);
+        // The automatic order lists plans first; the picked source still answers.
+        Assert.Equal([AnswerSource.CodexPlan, AnswerSource.Xai], credentials.AnswerSourcesInOrder);
+        Assert.Equal(AnswerSource.Xai, credentials.PrimaryAnswerSource);
         Assert.Null(ProviderCredentials.FromSettings(new() { AnswerSource = "auto" }).PreferredAnswerSource);
     }
 
@@ -140,7 +132,7 @@ public sealed class ProviderRouteTests
     }
 
     [Fact]
-    public void SpeechIsOpenAISpeechAsTheBackendAsksForIt()
+    public void SpeechIsOpenAISpeech()
     {
         var request = DirectProviderRequests.OpenAISpeech("sk-user", "hello");
         Assert.Equal("https://api.openai.com/v1/audio/speech", request.RequestUri!.AbsoluteUri);
@@ -154,7 +146,7 @@ public sealed class ProviderRouteTests
     }
 
     [Fact]
-    public void TranscriptionIsTheMultipartUploadTheBackendBuilds()
+    public void TranscriptionIsAMultipartUpload()
     {
         var request = DirectProviderRequests.OpenAITranscription("sk-user", Encoding.UTF8.GetBytes("RIFFdata"), "en", "OpenClicky", "b");
         Assert.Equal("https://api.openai.com/v1/audio/transcriptions", request.RequestUri!.AbsoluteUri);
@@ -183,7 +175,7 @@ public sealed class ProviderRouteTests
     }
 
     [Fact]
-    public void PolishIsHaikuWithTheBackendsCeiling()
+    public void PolishIsHaikuWithItsCeiling()
     {
         var body = Json(DirectProviderRequests.AnthropicPolish("ak-user", "tidy", "hi there"));
         Assert.Equal("claude-haiku-4-5", (string?)body["model"]);
@@ -204,20 +196,4 @@ public sealed class ProviderRouteTests
         Assert.Null(DirectProviderRequests.AnthropicReplyText(Encoding.UTF8.GetBytes("not json")));
     }
 
-    // MARK: a 401 on a PC with no account
-
-    [Fact]
-    public async Task A401ForARequestWithNoTokenSignsNobodyOut()
-    {
-        var request = new HttpRequestMessage(HttpMethod.Post, "https://backend.test/v1/messages");
-        var refusal = Encoding.UTF8.GetBytes("""{"error":"missing Authorization: Bearer <token>"}""");
-        var handling = new BackendSignIn.SignInRejectionHandling(
-            _ => throw new InvalidOperationException("a request with no token has no sign-in to handle"),
-            () => Task.FromResult<string?>(null),
-            () => throw new InvalidOperationException("nobody may be signed out"));
-        var answer = await BackendSignIn.SendAsync(request,
-            _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new ByteArrayContent(refusal) }),
-            handling);
-        Assert.Equal(401, (int)answer.StatusCode);
-    }
 }

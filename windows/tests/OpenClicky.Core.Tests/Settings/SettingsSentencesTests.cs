@@ -1,5 +1,4 @@
-// The rules the Settings rows read: the account form, the work slot, the keys list, the plan rows,
-// the account rows, and the Your words page's sentences (the Mac's CleanUpSwitchReadersTests /
+// The rules the Settings rows read: the work slot, the keys list, the plan rows, and the Your words page's sentences (the Mac's CleanUpSwitchReadersTests /
 // RecordPage sentence tests for what moved out of the views).
 
 using OpenClicky.Core.Configuration;
@@ -11,24 +10,6 @@ namespace OpenClicky.Core.Tests.Settings;
 
 public sealed class SettingsSentencesTests
 {
-    [Theory]
-    [InlineData("me@example.com", true)]
-    [InlineData("  me@example.com ", true)]
-    [InlineData("@example.com", false)]
-    [InlineData("me@example", false)]
-    [InlineData("me", false)]
-    public void AnEmailNeedsANameAnAtAndADot(string email, bool canSubmit) =>
-        Assert.Equal(canSubmit, EmailAccountFormRules.CanSubmitEmail(email));
-
-    [Theory]
-    [InlineData("123456", true)]
-    [InlineData("123 456", true)]
-    [InlineData("12345", false)]
-    [InlineData("12345a", false)]
-    [InlineData("١٢٣٤٥٦", false)]
-    public void ACodeIsSixDigits(string code, bool canSubmit) =>
-        Assert.Equal(canSubmit, EmailAccountFormRules.CanSubmitCode(code));
-
     [Fact]
     public async Task TheWorkSlotRunsOneThingAtATime()
     {
@@ -69,25 +50,6 @@ public sealed class SettingsSentencesTests
     }
 
     [Fact]
-    public void TheAllowanceRowNeverWaitsForeverWithoutASignIn()
-    {
-        Assert.Equal("Sign in to see usage", AccountRows.PlanSummary(null, null, usesOwnKeys: false, hasAccountToken: false).Trailing);
-        Assert.Equal("Your keys", AccountRows.PlanSummary(null, null, usesOwnKeys: true, hasAccountToken: false).Trailing);
-        Assert.Equal("Loading…", AccountRows.PlanSummary(null, null, usesOwnKeys: false, hasAccountToken: true).Trailing);
-        Assert.Equal("Needs account", AccountRows.BackendEngineUsage(false, false).Badge);
-    }
-
-    [Fact]
-    public void TheSidebarFootNamesThePerson()
-    {
-        Assert.Equal("prasanth", AccountRows.AccountName("prasanth@ahlab.org", "Prasanth Sasikumar"));
-        Assert.Equal("Prasanth S.", AccountRows.AccountName(null, "Prasanth Sasikumar"));
-        Assert.Equal("You", AccountRows.AccountName(null, ""));
-        Assert.Equal("P", AccountRows.AccountInitial("prasanth"));
-        Assert.Equal("Personal · no account", AccountRows.AccountStanding(false, false));
-    }
-
-    [Fact]
     public void TheEngineSentenceSaysWhereTheVoiceGoes()
     {
         var settings = new DictationSettings(Preferences.InMemory()) { Engine = DictationEngineChoice.Offline, Incognito = false };
@@ -102,7 +64,7 @@ public sealed class SettingsSentencesTests
     public void ReasonsBecomeSentencesWithTheirCapitals()
     {
         Assert.Equal("Needs your Sarvam key", WordsPageSentences.SentenceCased("needs your sarvam key"));
-        Assert.Equal("Sign in to OpenClicky or add an OpenAI key", WordsPageSentences.SentenceCased("sign in to openclicky or add an openai key"));
+        Assert.Equal("Add an OpenAI key to use OpenClicky", WordsPageSentences.SentenceCased("add an openai key to use openclicky"));
     }
 
     [Fact]
@@ -127,6 +89,6 @@ public sealed class SettingsSentencesTests
         Assert.True(DictationCleanUp.SwitchShowsOn(settings));
         DictationCleanUp.SetSwitch(settings, false);
         Assert.False(DictationCleanUp.SwitchShowsOn(settings));
-        Assert.EndsWith("free OpenClicky account.", DictationCleanUp.Detail(hasModel: false), StringComparison.Ordinal);
+        Assert.EndsWith("Needs an AI key (Settings → Keys & Plans).", DictationCleanUp.Detail(hasModel: false), StringComparison.Ordinal);
     }
 }

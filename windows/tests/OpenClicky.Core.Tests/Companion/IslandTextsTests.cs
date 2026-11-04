@@ -185,19 +185,12 @@ public class FirstRunTourCardsTests
         Assert.Contains("hold ctrl + windows", FirstRunTourCards.Make(FirstRunTourStep.Act, rightAlt).Detail);
         Assert.Contains("add a note", FirstRunTourCards.Make(FirstRunTourStep.Act, Inputs).Detail);
         Assert.Contains("open notepad", FirstRunTourCards.Make(FirstRunTourStep.Act, Inputs with { UsesAgent = false }).Detail);
-        Assert.Equal("add email", FirstRunTourCards.Make(FirstRunTourStep.Talk, Inputs with { CanAsk = false }).PrimaryTitle);
+        Assert.Equal("connect", FirstRunTourCards.Make(FirstRunTourStep.Talk, Inputs with { CanAsk = false }).PrimaryTitle);
     }
 
     [Fact]
-    public void TheAccountCardAsksForAnEmailThenACode()
+    public void TheOpenAtLoginCardOnlyCloses()
     {
-        var email = FirstRunTourCards.Make(FirstRunTourStep.Account, Inputs with { AccountCardAsksForEmail = true });
-        Assert.Equal(FirstRunTourFieldKind.Email, email.Field);
-        Assert.Equal("start", email.PrimaryTitle);
-        var code = FirstRunTourCards.Make(FirstRunTourStep.Account, Inputs with { AccountCardAsksForEmail = true, NeedsCode = true });
-        Assert.Equal(FirstRunTourFieldKind.Code, code.Field);
-        Assert.Equal("confirm", code.PrimaryTitle);
-        Assert.Null(FirstRunTourCards.Make(FirstRunTourStep.Account, Inputs).Field);
         var openAtLogin = FirstRunTourCards.Make(FirstRunTourStep.OpenAtLogin, Inputs with { StatusIsGood = true, Status = "✓" });
         Assert.Null(openAtLogin.PrimaryTitle);
         Assert.Equal("close", openAtLogin.SecondaryTitle);

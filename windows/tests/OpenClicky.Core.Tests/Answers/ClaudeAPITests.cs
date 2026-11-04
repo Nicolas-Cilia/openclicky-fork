@@ -1,15 +1,12 @@
 // Ports ClaudeToolStreamTests.swift (the tool-call parsing; the MacAction schema checks belong to
-// the Actions port), the ClaudeAPI half of BackendProxyURLFallbackTests.swift, and adds the
-// request/stream behaviour the Mac covered by hand, through HttpClients.UseHandler: an own key goes
-// to Anthropic with x-api-key, the account to /chat with its token (a refused sign-in renewed once),
-// text arrives as the whole answer so far, an error event or a refusal is thrown, and another answer
+// the Actions port), and adds the request/stream behaviour the Mac covered by hand, through
+// HttpClients.UseHandler: an own key goes to Anthropic with x-api-key, text arrives as the whole answer so far, an error event or a refusal is thrown, and another answer
 // source gets the question through its IAnswerProvider.
 
 using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
 using OpenClicky.Core.Answers;
-using OpenClicky.Core.Configuration;
 using OpenClicky.Core.Providers;
 using OpenClicky.Core.Tests.Providers;
 
@@ -88,33 +85,6 @@ public class ClaudeToolStreamTests
     }
 }
 
-public class BackendProxyUrlFallbackTests
-{
-    [Fact]
-    public void ClaudeApiUsesTheProxyUrlWhenItParses()
-    {
-        Assert.Equal("https://example.com/chat", ClaudeAPI.ResolvedApiUrl("https://example.com/chat").AbsoluteUri);
-    }
-
-    [Fact]
-    public void ClaudeApiFallsBackToTheHostedBackendWhenTheProxyUrlDoesNotParse()
-    {
-        Assert.Equal($"{OpenClickyConfiguration.HostedBackendUrl}/chat", ClaudeAPI.ResolvedApiUrl("").AbsoluteUri);
-        Assert.Equal($"{OpenClickyConfiguration.HostedBackendUrl}/chat", ClaudeAPI.ResolvedApiUrl("not a url").AbsoluteUri);
-    }
-
-    // F-31: the backend URL is read per request, so an edit to shell.json reaches the next question.
-    [Fact]
-    public void TheClientReadsTheBackendUrlForEveryRequest()
-    {
-        var currentBackend = "https://first.example";
-        var claudeApi = new ClaudeAPI(() => $"{currentBackend}/chat", warmUpConnection: false);
-        Assert.Equal("https://first.example/chat", claudeApi.ApiUrl.AbsoluteUri);
-        currentBackend = "https://second.example";
-        Assert.Equal("https://second.example/chat", claudeApi.ApiUrl.AbsoluteUri);
-    }
-}
-
 [Collection("HttpClients")]
 public class ClaudeApiRequestTests : IDisposable
 {
@@ -140,7 +110,6 @@ public class ClaudeApiRequestTests : IDisposable
     public void Dispose() => HttpClients.Reset();
 
     private static readonly ProviderCredentials OwnKey = new(null, "sk-ant-test", null);
-    private static readonly ProviderCredentials Account = new(null, null, "account-token");
 
     private static HttpResponseMessage Sse(params string[] events) => new(HttpStatusCode.OK)
     {
@@ -159,8 +128,8 @@ public class ClaudeApiRequestTests : IDisposable
         """data: {"type":"message_stop"}""",
     ];
 
-    private static ClaudeAPI Api(ProviderCredentials credentials, BackendSignIn.SignInRejectionHandling? signIn = null, AnswerProviderMaker? maker = null) =>
-        new(() => "https://backend.example/chat", "claude-test-model", () => credentials, signIn, maker, warmUpConnection: false);
+    private static ClaudeAPI Api(ProviderCredentials credentials, AnswerProviderMaker? maker = null) =>
+        new("claude-test-model", () => credentials, makeAnswerProvider: maker, warmUpConnection: false);
 
     private static readonly (byte[] Data, string Label)[] OneImage = [([0x89, 0x50, 0x4E, 0x47, 0x01], "screen 1 (image dimensions: 10x10 pixels)")];
 
@@ -207,42 +176,11 @@ public class ClaudeApiRequestTests : IDisposable
     }
 
     [Fact]
-    public async Task TheAccountGoesToChatWithItsToken()
-    {
-        recorder.Answer = (_, _) => Sse(AnswerEvents);
-        var result = await Api(Account).AnalyzeImageStreamingAsync(OneImage, "s", null, "q", null, _ => { });
-        Assert.Equal("[POINT:none] hi there.", result.Text);
-        var (request, _) = Assert.Single(recorder.Requests);
-        Assert.Equal("https://backend.example/chat", request.RequestUri!.AbsoluteUri);
-        Assert.Equal("Bearer account-token", request.HeaderValue("Authorization"));
-        Assert.Null(request.HeaderValue("x-api-key"));
-        Assert.Equal("application/json", request.HeaderValue("Content-Type"));
-    }
-
-    [Fact]
-    public async Task ARefusedSignInIsRenewedOnceAndTheQuestionSentAgain()
-    {
-        recorder.Answer = (_, count) => count == 1
-            ? new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("""{"error":"sign in again"}""") }
-            : Sse(AnswerEvents);
-        var signIn = new BackendSignIn.SignInRejectionHandling(
-            _ => Task.FromResult(OpenClickyAuthSession.RejectionOutcome.TryAgain),
-            () => Task.FromResult<string?>("renewed-token"),
-            () => Task.CompletedTask);
-        var result = await Api(Account, signIn).AnalyzeImageStreamingAsync(OneImage, "s", null, "q", null, _ => { });
-        Assert.Equal("[POINT:none] hi there.", result.Text);
-        Assert.Equal(2, recorder.Requests.Count);
-        Assert.Equal("Bearer renewed-token", recorder.Requests[1].Request.HeaderValue("Authorization"));
-        Assert.Equal(recorder.Requests[0].Body, recorder.Requests[1].Body);
-    }
-
-    [Fact]
     public async Task ARefusalIsThrownWithItsStatusAndBody()
     {
         recorder.Answer = (_, _) => new HttpResponseMessage(HttpStatusCode.PaymentRequired) { Content = new StringContent("{\"error\":\"limit\"}\n") };
-        var error = await Assert.ThrowsAsync<BackendHttpException>(() => Api(Account).AnalyzeImageStreamingAsync(OneImage, "s", null, "q", null, _ => { }));
+        var error = await Assert.ThrowsAsync<AnswerHttpException>(() => Api(OwnKey).AnalyzeImageStreamingAsync(OneImage, "s", null, "q", null, _ => { }));
         Assert.Equal(402, error.Status);
-        Assert.Equal(BackendHttpException.ServiceKind.Answers, error.Service);
         Assert.Equal("{\"error\":\"limit\"}", error.BodyText);
     }
 
@@ -261,7 +199,7 @@ public class ClaudeApiRequestTests : IDisposable
     public async Task NothingSetUpIsTheRoutesSentence()
     {
         var error = await Assert.ThrowsAsync<ProviderRouteUnavailableException>(() =>
-            Api(new ProviderCredentials(null, null, null)).AnalyzeImageStreamingAsync(OneImage, "s", null, "q", null, _ => { }));
+            Api(new ProviderCredentials(null, null)).AnalyzeImageStreamingAsync(OneImage, "s", null, "q", null, _ => { }));
         Assert.Equal(ProviderRouter.NeedsAnthropicKeySentence, error.Sentence);
         Assert.Empty(recorder.Requests);
     }
@@ -271,7 +209,7 @@ public class ClaudeApiRequestTests : IDisposable
     {
         var fake = new FakeAnswerProvider(["Red", ", plainly."], [new ClaudeToolCall("c", "open_app", new Dictionary<string, string> { ["name"] = "Edge" })]);
         AnswerSource? madeFor = null;
-        var api = Api(new ProviderCredentials(null, null, null, geminiKey: "AIza"), maker: (source, _, _) =>
+        var api = Api(new ProviderCredentials(null, null, geminiKey: "AIza"), maker: (source, _, _) =>
         {
             madeFor = source;
             return Task.FromResult<IAnswerProvider>(fake);
@@ -300,7 +238,7 @@ public class ClaudeApiRequestTests : IDisposable
         {
             Content = new StringContent("""{"content":[{"type":"text","text":"[POINT:12,34:Save]"}],"stop_reason":"end_turn"}"""),
         };
-        var reply = await Api(Account).AnalyzeImageAsync(OneImage, "locate", null, "where?");
+        var reply = await Api(OwnKey).AnalyzeImageAsync(OneImage, "locate", null, "where?");
         Assert.Equal("[POINT:12,34:Save]", reply.Text);
         var body = JsonNode.Parse(recorder.Requests.Single().Body)!.AsObject();
         Assert.Equal(256, body["max_tokens"]!.GetValue<int>());
@@ -319,7 +257,7 @@ public class ClaudeApiRequestTests : IDisposable
     public async Task TheShortAnswerGoesToAnotherSourcesProviderWithRoomToThink()
     {
         var fake = new FakeAnswerProvider(["[POINT:1,2]"], []);
-        var api = Api(new ProviderCredentials("sk-openai", null, null), maker: (_, _, _) => Task.FromResult<IAnswerProvider>(fake));
+        var api = Api(new ProviderCredentials("sk-openai", null), maker: (_, _, _) => Task.FromResult<IAnswerProvider>(fake));
         var reply = await api.AnalyzeImageAsync(OneImage, "s", null, "q");
         Assert.Equal("[POINT:1,2]", reply.Text);
         Assert.Equal(1024, fake.Requests.Single().MaxTokens);
@@ -330,13 +268,13 @@ public class ClaudeApiRequestTests : IDisposable
     public async Task TheWarmUpIsAHeadToTheHostsRoot()
     {
         ClaudeAPI.ResetTlsWarmup();
-        _ = new ClaudeAPI(() => "https://backend.example/chat", currentCredentials: () => OwnKey);
+        _ = new ClaudeAPI(currentCredentials: () => OwnKey);
         for (var attempt = 0; attempt < 100 && recorder.Requests.Count == 0; attempt++) await Task.Delay(20);
         var (request, _) = Assert.Single(recorder.Requests);
         Assert.Equal(HttpMethod.Head, request.Method);
         Assert.Equal("https://api.anthropic.com/", request.RequestUri!.AbsoluteUri);
         // Once per app run.
-        _ = new ClaudeAPI(() => "https://backend.example/chat", currentCredentials: () => OwnKey);
+        _ = new ClaudeAPI(currentCredentials: () => OwnKey);
         await Task.Delay(100);
         Assert.Single(recorder.Requests);
     }

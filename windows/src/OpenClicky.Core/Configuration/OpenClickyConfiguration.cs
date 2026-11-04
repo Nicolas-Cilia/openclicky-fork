@@ -339,6 +339,8 @@ public static class OpenClickyConfiguration
                 if (hasAfter) fileJsonObject[fieldName] = valueAfter?.DeepClone();
                 else fileJsonObject.Remove(fieldName);
             }
+            // Written when the app had accounts; nothing reads them now, so a save clears them out.
+            foreach (var retiredField in RetiredFields) fileJsonObject.Remove(retiredField);
             WriteShellSettingsData(SortedIndentedJson(fileJsonObject), filePath);
             return true;
         }
@@ -348,6 +350,8 @@ public static class OpenClickyConfiguration
             return false;
         }
     }
+
+    public static readonly IReadOnlyList<string> RetiredFields = ["backendUrl", "token", "refreshToken", "tokenExpiresAt", "accountEmail"];
 
     private static string SortedIndentedJson(JsonObject jsonObject)
     {

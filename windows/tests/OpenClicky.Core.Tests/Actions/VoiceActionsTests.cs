@@ -179,20 +179,19 @@ public class VoiceActionsTests
     }
 
     [Fact]
-    public void OwnCredentialsGoStraightToSpotifyElseTheBackend()
+    public void OwnCredentialsGoStraightToSpotifyElseNoLookup()
     {
-        var backend = new Uri("https://api.example.com");
-        Assert.Equal(new MusicLookupRoute.Spotify("id", "secret"), MusicLookupRoute.For(" id:secret ", backend));
-        Assert.Equal(new MusicLookupRoute.Backend(backend), MusicLookupRoute.For("no-colon", backend));
-        Assert.Equal(new MusicLookupRoute.Backend(backend), MusicLookupRoute.For(null, backend));
-        Assert.IsType<MusicLookupRoute.None>(MusicLookupRoute.For(":secret", null));
+        Assert.Equal(new MusicLookupRoute.Spotify("id", "secret"), MusicLookupRoute.For(" id:secret "));
+        Assert.IsType<MusicLookupRoute.None>(MusicLookupRoute.For(" "));
+        Assert.IsType<MusicLookupRoute.None>(MusicLookupRoute.For("no-colon"));
+        Assert.IsType<MusicLookupRoute.None>(MusicLookupRoute.For(null));
+        Assert.IsType<MusicLookupRoute.None>(MusicLookupRoute.For(":secret"));
+        Assert.Equal("spotify", MusicLookupRoute.For("id:secret").LogName);
     }
 
     [Fact]
-    public void BothCatalogueRepliesDecodeIntoTracks()
+    public void SpotifysReplyDecodesIntoTracks()
     {
-        var backend = MusicLookup.DecodeBackendResults("""{"tracks":[{"uri":"spotify:track:1","name":"Song","artists":["A","B"],"album":"x"}]}""");
-        Assert.Equal([new MusicTrack("spotify:track:1", "Song", ["A", "B"])], backend);
         var spotify = MusicLookup.DecodeSpotifyResults("""{"tracks":{"items":[{"uri":"spotify:track:2","name":"Tune","artists":[{"name":"C"}]}]}}""");
         Assert.Equal([new MusicTrack("spotify:track:2", "Tune", ["C"])], spotify);
         Assert.Equal("spotify:search:blinding%20lights", MusicLookup.SpotifySearchUri("blinding lights"));
@@ -217,7 +216,7 @@ public class VoiceActionsTests
         Assert.Equal(new DesktopActionOutcome.OpenedSpotifySearch("lo-fi beats"), noTrack);
         Assert.Equal(["spotify:search:lo-fi%20beats"], searchExecutor.SpotifyUris);
 
-        // The backend is not trusted with what Spotify is told to open: only a track URI plays.
+        // A lookup result is not trusted with what Spotify is told to open: only a track URI plays.
         var oddExecutor = new FakeExecutor();
         await Runner(oddExecutor, Tracks(new MusicTrack("https://evil.example", "Song", []))).PerformAsync(new DesktopAction.PlayMusic("song"));
         Assert.StartsWith("spotify:search:", Assert.Single(oddExecutor.SpotifyUris));

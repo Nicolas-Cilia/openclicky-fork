@@ -16,7 +16,7 @@ public sealed class SettingsTourTests
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            var candidate = Path.Combine(directory.FullName, "macos", "OpenClicky", "OpenClicky", "RecordedVoice");
+            var candidate = Path.Combine(directory.FullName, "src", "OpenClicky.Windows", "Assets", "RecordedVoice");
             if (Directory.Exists(candidate)) return candidate;
             directory = directory.Parent;
         }
@@ -45,7 +45,7 @@ public sealed class SettingsTourTests
     public void EveryStepPointsAtARowTheCatalogHas()
     {
         var catalog = new SettingsCatalog(new OpenClicky.Core.Dictation.DictationSettings(Preferences.InMemory()),
-            () => new OpenClickyShellSettings(), () => new OpenClicky.Core.Providers.AccountCapabilities(OpenClicky.Core.Providers.AccountKind.OwnKeys));
+            () => new OpenClickyShellSettings(), () => new OpenClicky.Core.Providers.ProviderCapabilities(true, true, false, null));
         var ids = catalog.AllItems.Select(item => item.Id).ToHashSet();
         foreach (var step in SettingsTourStep.All.Where(step => step.TargetId is not null)) Assert.Contains(step.TargetId!, ids);
     }
@@ -132,7 +132,7 @@ public sealed class SettingsTourTests
         Assert.Equal("end", pointer.Events[^1]);
         Assert.Contains("fly Dictation", pointer.Events);
         Assert.Contains("fly the key you hold", pointer.Events);
-        // Dictation, Your words (through Dictation), Clicky, Keys & Account, then back to General.
+        // Dictation, Your words (through Dictation), Clicky, Keys & Plans, then back to General.
         Assert.Equal(5, pointer.Events.Count(eventName => eventName == "click"));
         Assert.Equal(DictationDestination.Of(DictationSettingsPage.General), visited[^1]);
     }

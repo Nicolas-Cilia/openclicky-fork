@@ -102,8 +102,8 @@ public sealed class SettingsSearchTests
 
     // MARK: the catalog
 
-    private static SettingsCatalog Catalog(DictationSettings settings, OpenClickyShellSettings? shell = null, AccountKind kind = AccountKind.SignedOut) =>
-        new(settings, () => shell ?? new OpenClickyShellSettings(), () => new AccountCapabilities(kind));
+    private static SettingsCatalog Catalog(DictationSettings settings, OpenClickyShellSettings? shell = null, bool ownKey = false) =>
+        new(settings, () => shell ?? new OpenClickyShellSettings(), () => new ProviderCapabilities(ownKey, ownKey, false, null));
 
     [Fact]
     public void EveryItemIdIsUniqueAndEveryPageHasRows()
@@ -123,7 +123,7 @@ public sealed class SettingsSearchTests
         Assert.Equal(DictationSettingsPage.Clicky, talk.Page);
         Assert.False(talk.IsAdvanced);
         Assert.True(catalog.AllItems.Single(item => item.Id == "keyboard.cancel").IsAdvanced);
-        Assert.DoesNotContain(catalog.AllItems, item => item.Id is "keyboard.dictate" or "keyboard.where" or "general.region" or "about.checkNow" or "account.usage.offline");
+        Assert.DoesNotContain(catalog.AllItems, item => item.Id is "keyboard.dictate" or "keyboard.where" or "general.region" or "about.checkNow" or "keys.usage.offline");
         Assert.DoesNotContain(catalog.AllItems, item => item.Id.Contains("fn", StringComparison.Ordinal) || item.Id.Contains("haptics", StringComparison.Ordinal));
     }
 
@@ -149,11 +149,11 @@ public sealed class SettingsSearchTests
     public void HandsFreeAndFastVoiceNeedAnOwnOpenAIKey()
     {
         var settings = new DictationSettings(Preferences.InMemory());
-        var signedOut = Catalog(settings, kind: AccountKind.Account);
-        Assert.DoesNotContain(signedOut.PageItems(DictationSettingsPage.Clicky), item => item.Id == "keyboard.handsFree");
-        Assert.Contains(signedOut.PageItems(DictationSettingsPage.Clicky), item => item.Id == "clicky.fastVoiceNeedsKey");
+        var noKey = Catalog(settings);
+        Assert.DoesNotContain(noKey.PageItems(DictationSettingsPage.Clicky), item => item.Id == "keyboard.handsFree");
+        Assert.Contains(noKey.PageItems(DictationSettingsPage.Clicky), item => item.Id == "clicky.fastVoiceNeedsKey");
 
-        var ownKeys = Catalog(settings, kind: AccountKind.OwnKeys);
+        var ownKeys = Catalog(settings, ownKey: true);
         Assert.Contains(ownKeys.PageItems(DictationSettingsPage.Clicky), item => item.Id == "keyboard.handsFree");
         Assert.Contains(ownKeys.PageItems(DictationSettingsPage.Clicky), item => item.Id == "clicky.fastVoice");
         Assert.DoesNotContain(ownKeys.PageItems(DictationSettingsPage.Clicky), item => item.Id == "clicky.fastVoiceNeedsKey");
@@ -163,9 +163,9 @@ public sealed class SettingsSearchTests
     public void TheSarvamUsageRowShowsOnlyWithASarvamKey()
     {
         var settings = new DictationSettings(Preferences.InMemory());
-        Assert.DoesNotContain(Catalog(settings).PageItems(DictationSettingsPage.Account), item => item.Id == "account.usage.sarvam");
+        Assert.DoesNotContain(Catalog(settings).PageItems(DictationSettingsPage.Keys), item => item.Id == "keys.usage.sarvam");
         var shell = new OpenClickyShellSettings { SarvamKey = "sk_123" };
-        Assert.Contains(Catalog(settings, shell).PageItems(DictationSettingsPage.Account), item => item.Id == "account.usage.sarvam");
+        Assert.Contains(Catalog(settings, shell).PageItems(DictationSettingsPage.Keys), item => item.Id == "keys.usage.sarvam");
     }
 
     [Fact]

@@ -149,7 +149,7 @@ public class AnswerProviderHttpTests
     {
         using var request = OpenAIChatAnswerProvider.MakeHttpRequest(AnswerSource.OpenRouter, "or-test", "anthropic/claude-sonnet-4.6", SampleRequest());
         Assert.Equal("openrouter.ai", request.RequestUri!.Host);
-        Assert.Equal("https://github.com/prasanthsasikumar/openclicky", request.HeaderValue("HTTP-Referer"));
+        Assert.Equal("https://github.com/Nicolas-Cilia/openclicky-fork", request.HeaderValue("HTTP-Referer"));
         Assert.Equal("OpenClicky", request.HeaderValue("X-Title"));
         Assert.Equal("Bearer or-test", request.HeaderValue("Authorization"));
     }

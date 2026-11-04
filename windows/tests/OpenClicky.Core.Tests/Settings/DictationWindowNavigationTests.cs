@@ -50,9 +50,9 @@ public sealed class DictationWindowNavigationTests
     {
         // Otherwise "change engine" or the island's "open settings…" would leave results on screen.
         var model = new DictationWindowModel { SearchText = "microphone" };
-        model.Open(settingsPage: DictationSettingsPage.Account);
+        model.Open(settingsPage: DictationSettingsPage.Keys);
         Assert.False(model.IsSearching);
-        Assert.Equal(DictationDestination.Of(DictationSettingsPage.Account), model.Destination);
+        Assert.Equal(DictationDestination.Of(DictationSettingsPage.Keys), model.Destination);
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public sealed class DictationWindowNavigationTests
     [Fact]
     public void TheSidebarListsSixPages()
     {
-        Assert.Equal(["Dictation", "Clicky", "Island", "Keys & Account", "Privacy", "General"],
+        Assert.Equal(["Dictation", "Clicky", "Island", "Keys & Plans", "Privacy", "General"],
             DictationDestination.SidebarOrder.Select(destination => destination.Title));
     }
 

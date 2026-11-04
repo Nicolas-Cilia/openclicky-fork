@@ -1,4 +1,4 @@
-// The CompanionManager-level rules that are logic (OpenClickyTests, AskLaneFailureTests' account
+// The CompanionManager-level rules that are logic (OpenClickyTests, AskLaneFailureTests'
 // notices, HUDPlacementTests' open-at-login offer, NotchVoiceDestination), plus the seams the
 // integration added (the orb adapter, the connect card mapping).
 
@@ -18,9 +18,6 @@ public class CompanionManagerTests
                                                   int screenshotWidth = 1280, int screenshotHeight = 831, string device = "\\\\.\\DISPLAY1") =>
         new([1, 2, 3], "image/jpeg", "screen", isCursorScreen, width / 2, height / 2, new PixelRect(left, top, width, height), 2.0, device,
             screenshotWidth, screenshotHeight);
-
-    private static BackendHttpException Refusal(int status, string body) =>
-        new(BackendHttpException.ServiceKind.Answers, status, Encoding.UTF8.GetBytes(body));
 
     // MARK: pointing
 
@@ -44,42 +41,10 @@ public class CompanionManagerTests
     // MARK: the screens a question carries
 
     [Fact]
-    public void TheCursorScreenGoesFirstAndAnAccountSendsAtMostTwo()
+    public void TheCursorScreenGoesFirst()
     {
         var captures = new[] { Capture(false, device: "a"), Capture(false, device: "b"), Capture(true, device: "c") };
-        var ownKeys = CompanionManager.ScreensForAsk(captures, new AccountCapabilities(AccountKind.OwnKeys));
-        Assert.Equal(["c", "a", "b"], ownKeys.Select(capture => capture.DeviceName));
-        var account = CompanionManager.ScreensForAsk(captures, new AccountCapabilities(AccountKind.Account));
-        Assert.Equal(["c", "a"], account.Select(capture => capture.DeviceName));
-    }
-
-    // MARK: account notices (AskLaneFailureTests)
-
-    [Fact]
-    public void ALimitIsSaidOnceThenTheLaneFallsBackSilently()
-    {
-        var spoken = new HashSet<string>();
-        var error = Refusal(402, "{\"error\":\"daily_limit\"}");
-        Assert.True(CompanionManager.IsAccountNotice(error));
-        Assert.Equal(AccountLimitError.DailyLimit.Message(), CompanionManager.AccountNoticeToSpeak(error, spoken));
-        Assert.Null(CompanionManager.AccountNoticeToSpeak(error, spoken));
-    }
-
-    [Fact]
-    public void AnUnknownLimitSaysThePersonalLimit()
-    {
-        Assert.Equal(AccountLimitError.PersonalLimit.Message(), CompanionManager.LimitSentence(Refusal(402, "not json")));
-        Assert.Null(CompanionManager.LimitSentence(Refusal(500, "{}")));
-    }
-
-    [Fact]
-    public void TheFreeServicesTroubleIsANoticeButAnOrdinaryOutageIsNot()
-    {
-        var trouble = Refusal(503, "{\"error\":\"unavailable\"}");
-        Assert.True(CompanionManager.IsAccountNotice(trouble));
-        Assert.Equal(AccountLimitErrors.ServiceTroubleMessage, CompanionManager.AccountNoticeToSpeak(trouble, new HashSet<string>()));
-        Assert.False(CompanionManager.IsAccountNotice(Refusal(503, "{\"error\":\"overloaded\"}")));
-        Assert.False(CompanionManager.IsAccountNotice(new BackendHttpException(BackendHttpException.ServiceKind.Voice, 402, [])));
+        Assert.Equal(["c", "a", "b"], CompanionManager.ScreensForAsk(captures).Select(capture => capture.DeviceName));
     }
 
     // MARK: the open-at-sign-in offer (HUDPlacementTests)
@@ -112,15 +77,14 @@ public class CompanionManagerTests
     {
         Assert.Null(IslandVoiceDestination.BlockedPillLabel(DictationEngineChoice.Offline, null));
         Assert.Equal("add sarvam key ›", IslandVoiceDestination.BlockedPillLabel(DictationEngineChoice.Sarvam, "needs a sarvam key"));
-        Assert.Equal(DictationSettingsPage.Account, IslandVoiceDestination.SetupPage(DictationEngineChoice.Sarvam, "needs a sarvam key"));
+        Assert.Equal(DictationSettingsPage.Keys, IslandVoiceDestination.SetupPage(DictationEngineChoice.Sarvam, "needs a sarvam key"));
         Assert.Equal("download parakeet ›", IslandVoiceDestination.BlockedPillLabel(DictationEngineChoice.Parakeet, "not downloaded"));
         Assert.Equal("pick a language parakeet hears ›",
             IslandVoiceDestination.BlockedPillLabel(DictationEngineChoice.Parakeet, DictationEngineResolver.ParakeetLanguageNotHeardReason));
         Assert.Equal("open language settings",
             IslandVoiceDestination.ButtonTitle(DictationEngineChoice.Parakeet, DictationEngineResolver.ParakeetLanguageNotHeardReason));
-        Assert.Equal("set up backend ›", IslandVoiceDestination.BlockedPillLabel(DictationEngineChoice.OpenClicky, "needs an account"));
-        Assert.Equal(DictationSettingsPage.Account, IslandVoiceDestination.SetupPage(DictationEngineChoice.OpenClicky, "needs an account"));
-        Assert.Equal(DictationSettingsPage.Account, IslandVoiceDestination.SetupPage(DictationEngineChoice.OpenClicky, "needs your own key"));
+        Assert.Equal("add your openai key ›", IslandVoiceDestination.BlockedPillLabel(DictationEngineChoice.OpenAI, "needs your own openai key"));
+        Assert.Equal(DictationSettingsPage.Keys, IslandVoiceDestination.SetupPage(DictationEngineChoice.OpenAI, "needs your own openai key"));
         Assert.Equal(DictationSettingsPage.Dictation, IslandVoiceDestination.SetupPage(DictationEngineChoice.Parakeet, "not downloaded"));
         Assert.Equal("pick english or auto-detect ›",
             IslandVoiceDestination.BlockedPillLabel(DictationEngineChoice.Moonshine, DictationEngineResolver.MoonshineLanguageNotHeardReason));

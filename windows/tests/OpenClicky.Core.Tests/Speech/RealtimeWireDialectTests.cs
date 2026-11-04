@@ -45,25 +45,23 @@ public class RealtimeWireDialectTests
         events.Select(serverEvent => serverEvent["type"]?.GetValue<string>()).OfType<string>().ToList();
 
     [Fact]
-    public void ChoosesOpenAIFirstThenGeminiThenTheAccount()
+    public void ChoosesOpenAIFirstThenGemini()
     {
-        var both = new ProviderCredentials("sk", null, null, geminiKey: "g");
+        var both = new ProviderCredentials("sk", null, geminiKey: "g");
         Assert.Equal(RealtimeVoiceProvider.OpenAI, RealtimeVoiceProviders.Choose(both, null));
         Assert.Equal(RealtimeVoiceProvider.Gemini, RealtimeVoiceProviders.Choose(both, RealtimeVoiceProvider.Gemini));
-        var geminiOnly = new ProviderCredentials(null, null, null, geminiKey: "g");
+        var geminiOnly = new ProviderCredentials(null, null, geminiKey: "g");
         Assert.Equal(RealtimeVoiceProvider.Gemini, RealtimeVoiceProviders.Choose(geminiOnly, RealtimeVoiceProvider.OpenAI));
-        var account = new ProviderCredentials(null, null, "t");
-        Assert.Equal(RealtimeVoiceProvider.OpenAI, RealtimeVoiceProviders.Choose(account, RealtimeVoiceProvider.Gemini));
-        Assert.Null(RealtimeVoiceProviders.Choose(new ProviderCredentials(null, null, null), null));
+        Assert.Null(RealtimeVoiceProviders.Choose(new ProviderCredentials(null, null), null));
     }
 
     [Fact]
     public void AGeminiKeyAloneTurnsOnRealtime()
     {
-        Assert.True(new AccountCapabilities(AccountKind.SignedOut, OwnRealtimeKey: true).UsesRealtime);
-        Assert.False(new AccountCapabilities(AccountKind.SignedOut).UsesRealtime);
+        Assert.True(new ProviderCapabilities(false, true, false, null).UsesRealtime);
+        Assert.False(new ProviderCapabilities(false, false, false, null).UsesRealtime);
         var geminiOnly = new OpenClickyShellSettings { GeminiApiKey = "g" };
-        Assert.True(AccountCapabilities.Current(geminiOnly, Preferences.InMemory()).UsesRealtime);
+        Assert.True(ProviderCapabilities.Current(geminiOnly).UsesRealtime);
     }
 
     [Fact]
@@ -83,14 +81,13 @@ public class RealtimeWireDialectTests
     public void TheProviderPickerShowsOnlyWhenBothCanRun()
     {
         static SettingsCatalog Catalog(OpenClickyShellSettings shell) =>
-            new(new DictationSettings(Preferences.InMemory()), () => shell, () => AccountCapabilities.Current(shell, Preferences.InMemory()));
+            new(new DictationSettings(Preferences.InMemory()), () => shell, () => ProviderCapabilities.Current(shell));
         static bool ShowsPicker(OpenClickyShellSettings shell) =>
             Catalog(shell).PageItems(DictationSettingsPage.Clicky).Any(item => item.Id == "clicky.realtimeProvider");
 
         Assert.False(ShowsPicker(new OpenClickyShellSettings { GeminiApiKey = "g" }));
         Assert.False(ShowsPicker(new OpenClickyShellSettings { OpenaiApiKey = "sk" }));
         Assert.True(ShowsPicker(new OpenClickyShellSettings { GeminiApiKey = "g", OpenaiApiKey = "sk" }));
-        Assert.True(ShowsPicker(new OpenClickyShellSettings { GeminiApiKey = "g", Token = "t" }));
         // A Gemini key alone gets the fast voice switches instead of the way to a key.
         var geminiOnly = Catalog(new OpenClickyShellSettings { GeminiApiKey = "g" }).PageItems(DictationSettingsPage.Clicky);
         Assert.Contains(geminiOnly, item => item.Id == "clicky.fastVoice");

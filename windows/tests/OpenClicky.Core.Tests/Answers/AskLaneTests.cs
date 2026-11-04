@@ -23,29 +23,29 @@ public class AskLaneFailureTests
         // HttpClient's own timeout is a TaskCanceledException carrying a TimeoutException: a failure.
         Assert.False(AskLaneFailures.IsCancellation(new TaskCanceledException("timed out", new TimeoutException())));
         Assert.False(AskLaneFailures.IsCancellation(new TimeoutException()));
-        Assert.False(AskLaneFailures.IsCancellation(new BackendHttpException(BackendHttpException.ServiceKind.Answers, 500, [])));
+        Assert.False(AskLaneFailures.IsCancellation(new AnswerHttpException(500, [])));
     }
 
-    // F-34: a screenshot that cannot be taken is not a backend or token problem.
+    // F-34: a screenshot that cannot be taken is not a key problem.
     [Fact]
-    public void ACaptureFailureNamesTheScreenNotTheToken()
+    public void ACaptureFailureNamesTheScreenNotTheKey()
     {
         var captureError = new AskScreenCaptureException(new InvalidOperationException("BitBlt failed"));
         var permissionOff = AskLaneFailures.AskFailureSentence(captureError, screenRecordingAllowed: false);
         Assert.Contains("screen recording", permissionOff);
-        Assert.DoesNotContain("token", permissionOff);
+        Assert.DoesNotContain("key", permissionOff);
         var permissionOn = AskLaneFailures.AskFailureSentence(captureError);
         Assert.Contains("see your screen", permissionOn);
-        Assert.DoesNotContain("token", permissionOn);
+        Assert.DoesNotContain("key", permissionOn);
     }
 
     [Fact]
-    public void TheTokenSentenceIsKeptForARefusedToken()
+    public void ARefusedKeyIsSaidToBeTheKey()
     {
-        var forbidden = new BackendHttpException(BackendHttpException.ServiceKind.Answers, 403, []);
-        Assert.Equal("something went wrong talking to the openclicky backend. check the backend and your token in the settings file.",
-                     AskLaneFailures.AskFailureSentence(forbidden));
-        var serverError = new BackendHttpException(BackendHttpException.ServiceKind.Answers, 500, []);
+        const string ownKeyRefused = "your own api key was refused. check it in settings, keys & plans.";
+        Assert.Equal(ownKeyRefused, AskLaneFailures.AskFailureSentence(new AnswerHttpException(403, [])));
+        Assert.Equal(ownKeyRefused, AskLaneFailures.AskFailureSentence(new AnswerHttpException(401, [])));
+        var serverError = new AnswerHttpException(500, []);
         Assert.Equal("something went wrong getting your answer. please ask again.", AskLaneFailures.AskFailureSentence(serverError));
         Assert.Contains("internet", AskLaneFailures.AskFailureSentence(new HttpRequestException(HttpRequestError.ConnectionError, "no route")));
         Assert.Contains("internet", AskLaneFailures.AskFailureSentence(new HttpRequestException(HttpRequestError.NameResolutionError, "no such host")));
@@ -94,7 +94,6 @@ public class AskLanePromptsTests
     [Fact]
     public void TheAskLaneOffersQuickActionsWhenTheAgentLaneCantOrAPlanAnswers()
     {
-        Assert.True(AskLanePrompts.OffersQuickActionsToAskLane(agentLaneRuns: false, AnswerSource.OpenClickyAccount));
         Assert.True(AskLanePrompts.OffersQuickActionsToAskLane(agentLaneRuns: false, AnswerSource.OpenAI));
         Assert.True(AskLanePrompts.OffersQuickActionsToAskLane(agentLaneRuns: true, AnswerSource.ClaudeCodePlan));
         Assert.True(AskLanePrompts.OffersQuickActionsToAskLane(agentLaneRuns: true, AnswerSource.CodexPlan));
@@ -169,7 +168,6 @@ public class ScreenElementGroundingTests
     public void GroundingRunsOnEveryAnswerSourceButThePlans()
     {
         Assert.Null(ScreenElementGrounding.ReasonGroundingCannotRun(ProviderRoute.AnthropicDirect));
-        Assert.Null(ScreenElementGrounding.ReasonGroundingCannotRun(ProviderRoute.Backend));
         foreach (var source in new[] { AnswerSource.OpenAI, AnswerSource.OpenRouter, AnswerSource.Gemini, AnswerSource.Groq, AnswerSource.Mistral, AnswerSource.Xai })
         {
             Assert.Null(ScreenElementGrounding.ReasonGroundingCannotRun(ProviderRoute.AnswerProvider(source)));
@@ -184,8 +182,8 @@ public class ScreenElementGroundingTests
     public async Task TheGroundingRequestGoesThroughClaudeApi()
     {
         var fake = new FakeAnswerProvider(["[POINT:516, 503:arXiv]"], []);
-        var api = new ClaudeAPI(() => "https://backend.example/chat", ScreenElementGrounder.Model,
-                                () => new ProviderCredentials(null, null, null, groqKey: "gsk"), makeAnswerProvider: (_, _, _) => Task.FromResult<IAnswerProvider>(fake),
+        var api = new ClaudeAPI(ScreenElementGrounder.Model,
+                                () => new ProviderCredentials(null, null, groqKey: "gsk"), makeAnswerProvider: (_, _, _) => Task.FromResult<IAnswerProvider>(fake),
                                 warmUpConnection: false);
         var located = await ScreenElementGrounder.LocateAsync("paper link", "", "open this paper", [0xFF, 0xD8], 1280, 831,
             ScreenElementGrounding.GroundingRouteFor(ProviderRoute.AnswerProvider(AnswerSource.Groq)), ScreenElementGrounding.AnalyzeImageThrough(api));

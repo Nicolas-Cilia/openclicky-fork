@@ -176,7 +176,7 @@ public class AnswerSourceCheckTests
     [Fact]
     public async Task ASourceIsAskedAboutTheRedSquare()
     {
-        var credentials = new ProviderCredentials(null, null, null, groqKey: "gsk");
+        var credentials = new ProviderCredentials(null, null, groqKey: "gsk");
         var red = await AnswerSourceCheck.RunAsync(AnswerSource.Groq, credentials, new Dictionary<string, string>(),
                                                    _ => Task.FromResult<IAnswerProvider>(new FakeAnswerProvider(["Red."], [])));
         Assert.IsType<AnswerSourceCheck.Outcome.Works>(red);
@@ -187,24 +187,22 @@ public class AnswerSourceCheckTests
                                                        _ => throw new AnswerProviderException(AnswerSource.Groq, 401, "invalid API key"));
         Assert.Equal("Invalid API key", refused.Sentence);
         Assert.Equal("Add the key first.", (await AnswerSourceCheck.RunAsync(AnswerSource.Anthropic, credentials, new Dictionary<string, string>())).Sentence);
-        Assert.Equal("The free credits are checked by asking Clicky.",
-                     (await AnswerSourceCheck.RunAsync(AnswerSource.OpenClickyAccount, credentials, new Dictionary<string, string>())).Sentence);
     }
 
     [Fact]
     public async Task TheFactoryNamesWhatIsMissing()
     {
-        var none = new ProviderCredentials(null, null, null);
+        var none = new ProviderCredentials(null, null);
         var missingKey = await Assert.ThrowsAsync<AnswerProviderException>(() =>
             AnswerProviderFactory.MakeAsync(AnswerSource.Mistral, none, new Dictionary<string, string>()));
-        Assert.Equal("add its key in settings, account.", missingKey.VendorMessage);
+        Assert.Equal("add its key in settings, keys & plans.", missingKey.VendorMessage);
         var noClaude = await Assert.ThrowsAsync<AnswerProviderException>(() =>
             AnswerProviderFactory.MakeAsync(AnswerSource.ClaudeCodePlan, none, new Dictionary<string, string>(), () => Task.FromResult<string?>(null)));
         Assert.Equal("the claude code app (claude) isn't installed on this pc.", noClaude.VendorMessage);
-        var withModel = await AnswerProviderFactory.MakeAsync(AnswerSource.OpenRouter, new ProviderCredentials(null, null, null, openRouterKey: "or"),
+        var withModel = await AnswerProviderFactory.MakeAsync(AnswerSource.OpenRouter, new ProviderCredentials(null, null, openRouterKey: "or"),
                                                               new Dictionary<string, string> { ["openRouter"] = "x-ai/grok-4" });
         Assert.Equal("x-ai/grok-4", Assert.IsType<OpenAIChatAnswerProvider>(withModel).Model);
-        var defaultModel = await AnswerProviderFactory.MakeAsync(AnswerSource.Gemini, new ProviderCredentials(null, null, null, geminiKey: "g"),
+        var defaultModel = await AnswerProviderFactory.MakeAsync(AnswerSource.Gemini, new ProviderCredentials(null, null, geminiKey: "g"),
                                                                  new Dictionary<string, string> { ["gemini"] = "" });
         Assert.Equal("gemini-3.8-flash", Assert.IsType<GeminiAnswerProvider>(defaultModel).Model);
         var codex = await AnswerProviderFactory.MakeAsync(AnswerSource.CodexPlan, none, new Dictionary<string, string>(),

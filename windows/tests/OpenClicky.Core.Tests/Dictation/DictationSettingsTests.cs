@@ -55,7 +55,7 @@ public sealed class DictationSettingsTests
         var preferences = Preferences.InMemory();
         var settings = new DictationSettings(preferences)
         {
-            Engine = DictationEngineChoice.AssemblyAI,
+            Engine = DictationEngineChoice.OpenAI,
             LanguageCode = "hi-IN",
             Script = DictationScript.Roman,
             OrbTheme = OrbTheme.Coral,
@@ -64,7 +64,7 @@ public sealed class DictationSettingsTests
             DictationKey = DictationHotkey.RightAlt,
             KeepMemoryOnThisPC = true,
         };
-        Assert.Equal("assemblyai", preferences.GetString("dictation.engine"));
+        Assert.Equal("openclicky", preferences.GetString("dictation.engine"));
         Assert.Equal("hi-IN", preferences.GetString("dictation.language"));
         Assert.Equal("roman", preferences.GetString("dictation.script"));
         Assert.Equal("coral", preferences.GetString("dictation.orb.theme"));
@@ -75,7 +75,7 @@ public sealed class DictationSettingsTests
         Assert.True(preferences.GetBool("dictation.keepMemoryOnThisMac"));
 
         var reread = new DictationSettings(preferences);
-        Assert.Equal(DictationEngineChoice.AssemblyAI, reread.Engine);
+        Assert.Equal(DictationEngineChoice.OpenAI, reread.Engine);
         Assert.Equal(new OrbPoint(100, 250.5), reread.OrbPosition);
         Assert.Equal(0, reread.InactivityTimeoutMinutes);
         Assert.Equal(AppRegion.World, reread.Region);
@@ -120,7 +120,7 @@ public sealed class DictationSettingsTests
     }
 
     /// <summary>
-    /// The 0.8.0 upgrader: "polish with a model" was turned off, and a free account's default then
+    /// The 0.8.0 upgrader: "polish with a model" was turned off, and the old default then
     /// turned "also polish offline takes" on. Nothing is polished, so nothing may say it is.
     /// </summary>
     [Fact]
@@ -137,30 +137,12 @@ public sealed class DictationSettingsTests
     }
 
     [Fact]
-    public void TheAccountDefaultFollowsTheAccountUntilThePersonChooses()
-    {
-        var preferences = Preferences.InMemory();
-        var settings = new DictationSettings(preferences);
-        settings.ApplyAccountPolishDefault(AccountKind.Account);
-        Assert.True(settings.PolishOfflineTakes);
-        // The default is not stored, so it follows the account as it changes.
-        Assert.False(preferences.Contains(DictationSettings.Keys.PolishOfflineTakes));
-        settings.ApplyAccountPolishDefault(AccountKind.SignedOut);
-        Assert.False(settings.PolishOfflineTakes);
-
-        settings.ChoosePolishOfflineTakes(false);
-        settings.ApplyAccountPolishDefault(AccountKind.Account);
-        Assert.False(settings.PolishOfflineTakes);
-    }
-
-    [Fact]
     public void AStoredValueFromBeforeTheChoiceFlagCountsAsChosen()
     {
         var preferences = Preferences.InMemory();
         preferences.Set(DictationSettings.Keys.PolishOfflineTakes, false);
         var settings = new DictationSettings(preferences);
         Assert.True(preferences.GetBool(DictationSettings.Keys.PolishOfflineTakesChosen));
-        settings.ApplyAccountPolishDefault(AccountKind.Account);
         Assert.False(settings.PolishOfflineTakes);
     }
 
@@ -198,15 +180,15 @@ public sealed class DictationSettingsTests
     [Fact]
     public void TheEnginesKeepTheMacsRawValues()
     {
-        Assert.Equal(["moonshine", "parakeet", "offline", "sarvam", "openclicky", "assemblyai"], DictationEngineChoices.AllCases.Select(engine => engine.Id()));
+        Assert.Equal(["moonshine", "parakeet", "offline", "sarvam", "openclicky"], DictationEngineChoices.AllCases.Select(engine => engine.Id()));
         Assert.Equal("Moonshine, built in", DictationEngineChoice.Moonshine.SettingsTitle());
         Assert.Equal("this pc", DictationEngineChoice.Moonshine.ListenerName());
-        Assert.Equal(DictationEngineChoice.OpenClicky, DictationEngineChoices.FromRawValue("openclicky"));
+        Assert.Equal(DictationEngineChoice.OpenAI, DictationEngineChoices.FromRawValue("openclicky"));
         Assert.Equal("Windows speech recognition", DictationEngineChoice.Offline.SettingsTitle());
         Assert.Equal("windows", DictationEngineChoice.Offline.ListenerName());
         Assert.Equal("this pc", DictationEngineChoice.Parakeet.ListenerName());
         Assert.Contains("windows", DictationEngineChoice.Offline.SearchKeywords());
-        Assert.Contains("cloud", DictationEngineChoice.OpenClicky.SearchKeywords());
+        Assert.Contains("cloud", DictationEngineChoice.OpenAI.SearchKeywords());
         Assert.Contains("hindi", DictationEngineChoice.Sarvam.SearchKeywords());
         Assert.Equal("", DictationEngineChoice.Offline.UnavailableBadge());
     }
@@ -247,12 +229,12 @@ public sealed class DictationSettingsTests
     [Fact]
     public void EachEngineSaysWhatItIsMissing()
     {
-        string? Reason(DictationEngineChoice engine, AccountKind kind = AccountKind.OwnKeys, bool isConfigured = true, bool signedIn = true,
-                       string? sarvamKey = "k", bool parakeetInstalled = true, string? bareLanguage = null, bool moonshineInstalled = true) =>
-            DictationEngineResolver.UnavailableReason(engine, kind, isConfigured, signedIn, sarvamKey, parakeetInstalled, () => bareLanguage, moonshineInstalled);
+        string? Reason(DictationEngineChoice engine, bool hasOpenAIKey = true, string? sarvamKey = "k", bool parakeetInstalled = true,
+                       string? bareLanguage = null, bool moonshineInstalled = true) =>
+            DictationEngineResolver.UnavailableReason(engine, hasOpenAIKey, sarvamKey, parakeetInstalled, () => bareLanguage, moonshineInstalled);
 
-        Assert.Null(Reason(DictationEngineChoice.Offline, isConfigured: false));
-        Assert.Null(Reason(DictationEngineChoice.Moonshine, isConfigured: false));
+        Assert.Null(Reason(DictationEngineChoice.Offline, hasOpenAIKey: false));
+        Assert.Null(Reason(DictationEngineChoice.Moonshine, hasOpenAIKey: false));
         Assert.Null(Reason(DictationEngineChoice.Moonshine, bareLanguage: "en"));
         Assert.Equal(DictationEngineResolver.MoonshineLanguageNotHeardReason, Reason(DictationEngineChoice.Moonshine, bareLanguage: "de"));
         Assert.Equal(DictationEngineResolver.MoonshineMissingReason, Reason(DictationEngineChoice.Moonshine, moonshineInstalled: false));
@@ -261,22 +243,19 @@ public sealed class DictationSettingsTests
         Assert.Null(Reason(DictationEngineChoice.Parakeet, bareLanguage: "de"));
         Assert.Equal("needs your sarvam key", Reason(DictationEngineChoice.Sarvam, sarvamKey: " \n"));
         Assert.Null(Reason(DictationEngineChoice.Sarvam));
-        Assert.Equal("needs an openclicky account or your openai key", Reason(DictationEngineChoice.OpenClicky, isConfigured: false));
-        Assert.Equal("needs your own key", Reason(DictationEngineChoice.AssemblyAI, kind: AccountKind.Account));
-        Assert.Equal("needs an openclicky account: assemblyai runs on openclicky's key", Reason(DictationEngineChoice.AssemblyAI, signedIn: false));
-        Assert.Null(Reason(DictationEngineChoice.OpenClicky, signedIn: false));
+        Assert.Equal("needs your own openai key", Reason(DictationEngineChoice.OpenAI, hasOpenAIKey: false));
+        Assert.Null(Reason(DictationEngineChoice.OpenAI));
     }
 
     [Fact]
     public void ThePolisherFollowsTheKeys()
     {
-        Assert.IsType<SarvamTakePolisher>(DictationEngineResolver.MakePolisher(" s ", new ProviderCredentials("o", "a", "t"), AccountKind.OwnKeys));
-        Assert.IsType<AnthropicTakePolisher>(DictationEngineResolver.MakePolisher(null, new ProviderCredentials(null, "a", null), AccountKind.SignedOut));
-        Assert.IsType<AnswerKeyTakePolisher>(DictationEngineResolver.MakePolisher(null, new ProviderCredentials(null, null, null, groqKey: "q"), AccountKind.SignedOut));
-        // An OpenAI key polishes on OpenAI (BackendTakePolisher routes it there), ahead of the other keys.
-        Assert.IsType<BackendTakePolisher>(DictationEngineResolver.MakePolisher(null, new ProviderCredentials("o", "a", null), AccountKind.OwnKeys));
-        Assert.IsType<AccountTakePolisher>(DictationEngineResolver.MakePolisher(null, new ProviderCredentials(null, null, "t"), AccountKind.Account));
-        Assert.Null(DictationEngineResolver.MakePolisher("", new ProviderCredentials(null, null, null), AccountKind.SignedOut));
+        Assert.IsType<SarvamTakePolisher>(DictationEngineResolver.MakePolisher(" s ", new ProviderCredentials("o", "a")));
+        Assert.IsType<AnthropicTakePolisher>(DictationEngineResolver.MakePolisher(null, new ProviderCredentials(null, "a")));
+        Assert.IsType<AnswerKeyTakePolisher>(DictationEngineResolver.MakePolisher(null, new ProviderCredentials(null, null, groqKey: "q")));
+        // An OpenAI key polishes on OpenAI, ahead of the other keys.
+        Assert.IsType<OpenAITakePolisher>(DictationEngineResolver.MakePolisher(null, new ProviderCredentials("o", "a")));
+        Assert.Null(DictationEngineResolver.MakePolisher("", new ProviderCredentials(null, null)));
     }
 
     // MARK: the language every engine hears (HearingSettingsTests, F-16)
@@ -287,15 +266,13 @@ public sealed class DictationSettingsTests
         public Func<string?>? MoonshineLanguage { get; private set; }
         public Func<string?>? ParakeetLanguage { get; private set; }
         public Func<DictationLanguage>? SarvamLanguage { get; private set; }
-        public Func<string?>? OpenClickyLanguage { get; private set; }
-        public Func<string?>? AssemblyAILanguage { get; private set; }
+        public Func<string?>? OpenAILanguage { get; private set; }
 
         public IBuddyTranscriptionProvider MakeOffline(string? preferredLocale) { OfflineLocale = preferredLocale; return new NamedTranscriptionProvider("offline"); }
         public IBuddyTranscriptionProvider MakeMoonshine(Func<string?> bareLanguageCode) { MoonshineLanguage = bareLanguageCode; return new NamedTranscriptionProvider("moonshine"); }
         public IBuddyTranscriptionProvider MakeParakeet(Func<string?> bareLanguageCode) { ParakeetLanguage = bareLanguageCode; return new NamedTranscriptionProvider("parakeet"); }
         public IBuddyTranscriptionProvider MakeSarvam(Func<DictationLanguage> language) { SarvamLanguage = language; return new NamedTranscriptionProvider("sarvam"); }
-        public IBuddyTranscriptionProvider MakeOpenClicky(Func<string?> bareLanguageCode) { OpenClickyLanguage = bareLanguageCode; return new NamedTranscriptionProvider("openclicky"); }
-        public IBuddyTranscriptionProvider MakeAssemblyAI(Func<string?> bareLanguageCode) { AssemblyAILanguage = bareLanguageCode; return new NamedTranscriptionProvider("assemblyai"); }
+        public IBuddyTranscriptionProvider MakeOpenAI(Func<string?> bareLanguageCode) { OpenAILanguage = bareLanguageCode; return new NamedTranscriptionProvider(DictationEngineChoice.OpenAI.Id()); }
     }
 
     [Fact]
@@ -310,14 +287,12 @@ public sealed class DictationSettingsTests
         Assert.Equal("hi-IN", factory.OfflineLocale);
         Assert.Equal("hi", factory.MoonshineLanguage!());
         Assert.Equal("hi", factory.ParakeetLanguage!());
-        Assert.Equal("hi", factory.OpenClickyLanguage!());
-        Assert.Equal("hi", factory.AssemblyAILanguage!());
+        Assert.Equal("hi", factory.OpenAILanguage!());
         Assert.Equal("hi-IN", factory.SarvamLanguage!().Code);
 
         // Read when a take starts: auto sends none, so the model detects it.
         settings.LanguageCode = "auto";
-        Assert.Null(factory.OpenClickyLanguage());
-        Assert.Null(factory.AssemblyAILanguage());
+        Assert.Null(factory.OpenAILanguage());
         Assert.Equal(DictationLanguage.Auto, factory.SarvamLanguage());
         DictationEngineResolver.MakeProvider(DictationEngineChoice.Offline, settings, factory);
         Assert.Null(factory.OfflineLocale);
