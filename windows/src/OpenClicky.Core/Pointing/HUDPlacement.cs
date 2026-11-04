@@ -55,5 +55,14 @@ public static class HUDPlacements
     };
 
     /// <summary>True for the two drawer placements, whose island hangs from a screen edge instead of the top.</summary>
+    /// <summary>How to reach the island from here, for the tour's last card.</summary>
+    public static string ReachSentence(this HUDPlacement placement) => placement switch
+    {
+        HUDPlacement.Left => "hover the left edge of your screen any time.",
+        HUDPlacement.Right => "hover the right edge of your screen any time.",
+        HUDPlacement.Hidden => "i’ll stay out of sight until you use a shortcut.",
+        _ => "hover the island at the top any time.",
+    };
+
     public static bool IsSideDrawer(this HUDPlacement placement) => placement is HUDPlacement.Left or HUDPlacement.Right;
 }

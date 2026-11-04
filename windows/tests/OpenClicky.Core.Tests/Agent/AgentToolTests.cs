@@ -1,5 +1,6 @@
 using OpenClicky.Core.Agent;
 using OpenClicky.Core.Companion;
+using OpenClicky.Core.Pointing;
 using OpenClicky.Core.Speech;
 using Xunit;
 
@@ -36,6 +37,15 @@ public class AgentToolTests
     [InlineData("v20.11.1", false)]
     [InlineData("nonsense", false)]
     public void NodeMustBeNewEnough(string version, bool expected) => Assert.Equal(expected, AgentTool.IsNewEnough(version));
+
+    [Fact]
+    public void TheLastCardSaysWhereTheIslandReallyIs()
+    {
+        Assert.Contains("at the top", HUDPlacement.Notch.ReachSentence());
+        Assert.Contains("right edge", HUDPlacement.Right.ReachSentence());
+        Assert.Contains("left edge", HUDPlacement.Left.ReachSentence());
+        Assert.DoesNotContain("hover", HUDPlacement.Hidden.ReachSentence());
+    }
 
     [Fact]
     public void KokoroIsOfferedOnlyToSomeoneOnThePCsOwnVoice()

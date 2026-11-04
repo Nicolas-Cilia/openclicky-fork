@@ -135,9 +135,9 @@ public sealed class IslandLayout
     {
         get
         {
-            // A side drawer is narrower, so the copy wraps onto more lines.
+            // A side drawer is narrower: the words wrap onto more lines, and the buttons sit under them.
             var statusRoom = (State.TourHasStatus ? 38 : 0) + (State.TourHasMicrophoneName ? 20 : 0);
-            return CardTopInset + (Placement.IsSideDrawer() ? 168 : 116) + statusRoom;
+            return CardTopInset + (Placement.IsSideDrawer() ? 196 : 116) + statusRoom;
         }
     }
 

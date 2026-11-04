@@ -84,6 +84,7 @@ public sealed partial class CompanionManager
     /// <summary>After the first few uses the pointer waits for a shake, unless the person picked a setting. Said once.</summary>
     private void HidePointerUntilShakeOnceItIsFamiliar()
     {
+        if (!IsClickyCursorEnabled) return;
         var useCount = preferences.GetInt(FirstRunTourController.UseCountKey);
         var personChoseOne = preferences.GetString(PointerPresenceKey) is not null;
         if (PointerPresenceDefault.PresenceToSwitchTo(useCount, personChoseOne, pointerPresence) is not { } newPresence) return;

@@ -15,6 +15,7 @@
 
 using OpenClicky.Core.Configuration;
 using OpenClicky.Core.Dictation;
+using OpenClicky.Core.Pointing;
 using OpenClicky.Core.Providers;
 using OpenClicky.Core.Settings;
 using OpenClicky.Core.Shortcuts;
@@ -351,7 +352,8 @@ public sealed class FirstRunTourController
                 if (OpenClickyConfiguration.IsConfigured) companion.RecordedVoice.Play(RecordedVoice.Line.TourAct);
                 break;
             case FirstRunTourStep.Done:
-                companion.RecordedVoice.Play(RecordedVoice.Line.TourDone);
+                // The recording talks about the top of the screen, which is wrong on a side drawer.
+                if (!companion.HudPlacement.IsSideDrawer()) companion.RecordedVoice.Play(RecordedVoice.Line.TourDone);
                 break;
         }
         Publish();
@@ -404,6 +406,8 @@ public sealed class FirstRunTourController
         preferences.Remove(StepKey);
         companion.DictationSettings.HasCompletedDictationOnboarding = true;
         AppLog.Write("tour: finished");
+        // The tour brought the pointer out to introduce it; on "while I talk" it leaves again now.
+        companion.Overlay.ScheduleTransientHideIfNeeded();
         Publish();
         // Setup is done: the models can download in the background now.
         companion.StartAutomaticModelDownloads(tourIsFinished: true);
@@ -527,7 +531,8 @@ public sealed class FirstRunTourController
             Status: status,
             StatusIsGood: statusIsGood,
             MicrophoneName: currentStep == FirstRunTourStep.Dictate ? companion.MicrophoneName() : null,
-            OffersMicrophoneChange: offersMicrophoneChange);
+            OffersMicrophoneChange: offersMicrophoneChange,
+            Placement: companion.HudPlacement);
         return FirstRunTourCards.Make(currentStep, inputs);
     }
 

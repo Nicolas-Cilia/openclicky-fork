@@ -41,6 +41,21 @@ enum HUDPlacement: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Whether the island hangs from a real notch, which is what the recorded goodbye talks about.
+    func isAtTheNotch(hasHardwareNotch: Bool) -> Bool {
+        hasHardwareNotch && (self == .notch || self == .automatic)
+    }
+
+    /// How to reach the island from here, for the tour's last card.
+    func reachSentence(hasHardwareNotch: Bool) -> String {
+        switch self {
+        case .automatic, .notch: return hasHardwareNotch ? "hover the notch any time." : "hover the top of your screen any time."
+        case .left: return "hover the left edge of your screen any time."
+        case .right: return "hover the right edge of your screen any time."
+        case .hidden: return "i’ll stay out of sight until you use a shortcut."
+        }
+    }
+
     /// True for the two drawer placements, whose island hangs from a screen edge instead of the top.
     var isSideDrawer: Bool { self == .left || self == .right }
 
