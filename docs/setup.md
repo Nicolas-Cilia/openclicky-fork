@@ -28,19 +28,17 @@ Agent tasks run through the `openclicky` tool in `agent/`, which starts Codex in
 (`~/.openclicky/codex-home`) and shares your ChatGPT sign-in from `~/.codex/auth.json`. With an
 OpenAI key set, it uses the key instead.
 
-Each machine needs this repository checked out and built. Then either put the tool on your PATH:
+The tool ships inside the app (`Contents/Resources/agent-tool` on Mac, `agent-tool\\` beside the exe on
+Windows). It runs on this machine's Node.js 22 or later, or on a copy the app downloads once from
+nodejs.org, checked against a pinned SHA-256, when agent tasks are set up and there is no Node to use.
 
-```bash
-npm link -w agent
-```
-
-or point the app at it in `~/.openclicky/shell.json`:
+To work on the tool itself, point the app at your build in `~/.openclicky/shell.json`:
 
 ```json
 { "cliCommand": ["node", "/path/to/openclicky-fork/agent/dist/cli.js"] }
 ```
 
-From a terminal:
+From a terminal, after `npm link -w agent`:
 
 ```bash
 openclicky run "create a file called hello.txt"   # a full agent task

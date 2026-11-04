@@ -32,6 +32,7 @@ public sealed partial class CompanionManager
                 await Task.Delay(AgentHousekeeping.FirstCleanupDelay, cancellation.Token).ConfigureAwait(false);
                 while (!cancellation.IsCancellationRequested)
                 {
+                    if (ProviderCapabilities.Current().UsesAgent) await openClickyAgentClient.DownloadNodeIfNeededAsync().ConfigureAwait(false);
                     await DeleteExpiredAgentSessionsAsync(cancellation.Token).ConfigureAwait(false);
                     await Task.Delay(AgentHousekeeping.CleanupInterval, cancellation.Token).ConfigureAwait(false);
                 }
@@ -52,7 +53,7 @@ public sealed partial class CompanionManager
     private async Task DeleteExpiredAgentSessionsAsync(CancellationToken cancellationToken)
     {
         var days = AgentSessionLimit.Days(OpenClickyConfiguration.Settings.AgentSessionDays);
-        if (days <= 0) return;
+        if (days <= 0 || !openClickyAgentClient.IsToolInstalled) return;
         try
         {
             var deleted = await openClickyAgentClient.PruneThreadsAsync(days, cancellationToken).ConfigureAwait(false);

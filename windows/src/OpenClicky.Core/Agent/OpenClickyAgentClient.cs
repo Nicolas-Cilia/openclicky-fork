@@ -127,7 +127,7 @@ public sealed class OpenClickyAgentException(string message, Exception? inner = 
     /// doesn't carry it).
     /// </summary>
     public const string ToolMissingMessage =
-        "agents run through the openclicky command-line tool, which isn't on this pc. questions, pointing and quick actions still work.";
+        "agent tasks are still setting up on this pc. try again in a minute. questions, pointing and quick actions still work.";
 }
 
 /// <summary>
@@ -310,6 +310,9 @@ public sealed class OpenClickyAgentClient
         var output = await CaptureStandardOutputAsync(["threads", "list", "--limit", limit.ToString(CultureInfo.InvariantCulture), "--json"], cancellationToken).ConfigureAwait(false);
         return OpenClickyThreadDetail.DecodeList(output);
     }
+
+    /// <summary>Fetches Node if agent tasks are waiting for it (AgentTool).</summary>
+    public Task DownloadNodeIfNeededAsync() => AgentTool.DownloadNodeIfNeededAsync(processRunner);
 
     /// <summary>Deletes threads untouched for this many days, and returns their ids.</summary>
     public async Task<IReadOnlyList<string>> PruneThreadsAsync(int olderThanDays, CancellationToken cancellationToken = default)

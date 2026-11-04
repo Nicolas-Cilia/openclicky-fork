@@ -23,14 +23,19 @@ It shares no accounts or servers with the original project and takes no updates 
 
 ## Install
 
-**Mac (macOS 14.2 or later):** download the dmg from [Releases](https://github.com/Nicolas-Cilia/openclicky-fork/releases/latest)
-and move the app to Applications. It is self-signed rather than notarized, so the first time on each Mac
-you need to right-click it and choose Open (on newer macOS: System Settings → Privacy & Security → Open
-Anyway). Later updates install themselves.
+These links always give you the newest version:
 
-**Windows (10 version 2004 or later, or 11):** run the Setup.exe from
-[Releases](https://github.com/Nicolas-Cilia/openclicky-fork/releases/latest). It is unsigned, so SmartScreen
-warns the first time: choose More info → Run anyway.
+- **[Download for Mac](https://github.com/Nicolas-Cilia/openclicky-fork/releases/latest/download/OpenClicky.dmg)** (macOS 14.2 or later)
+- **[Download for Windows](https://github.com/Nicolas-Cilia/openclicky-fork/releases/latest/download/OpenClicky-Setup.exe)** (Windows 10 version 2004 or later, or 11; for ARM PCs use the [ARM64 installer](https://github.com/Nicolas-Cilia/openclicky-fork/releases/latest/download/OpenClicky-Setup-arm64.exe))
+
+**Mac:** open the dmg and drag the app to Applications. It is self-signed rather than notarized, so the
+first time on each Mac you need to right-click it and choose Open (on newer macOS: System Settings →
+Privacy & Security → Open Anyway).
+
+**Windows:** run the installer. It is unsigned, so SmartScreen warns the first time: choose More info →
+Run anyway.
+
+Later updates install themselves.
 
 ## Connect your plans
 
@@ -49,8 +54,9 @@ In Settings:
 - **Keys & Plans** shows each plan's usage: what OpenClicky sent (requests and tokens, today and this
   month) and how full the plan's own limits are. The limit bars count everything on that account.
 
-Agent tasks only run on Codex, so they pause until the reset when Codex runs out. They also need the
-`openclicky` tool: see [Run the agent](docs/setup.md#run-the-agent).
+Agent tasks only run on Codex, so they pause until the reset when Codex runs out. The tool they run
+through is in the app. It needs Node.js 22 or later: if your computer doesn't have it, the app downloads
+it once (about 30 MB, about 110 MB on disk) when you have agent tasks set up.
 
 Fast realtime voice has no subscription route: it needs an OpenAI or Gemini API key.
 

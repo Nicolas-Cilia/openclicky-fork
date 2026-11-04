@@ -120,7 +120,7 @@ public sealed record ModelDownload(Uri Url, string Sha256, long Bytes)
             var result = await unpacker.RunAsync(new ProcessLaunchRequest
             {
                 Command = TarExecutablePath,
-                Arguments = ["-xjf", archive, "-C", staging],
+                Arguments = ["-xf", archive, "-C", staging],
             }, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (result.ExitCode != 0) throw ModelDownloadException.UnpackFailed($"tar exited with {result.ExitCode}");
             foreach (var entry in Directory.EnumerateFileSystemEntries(staging))

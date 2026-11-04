@@ -23,6 +23,8 @@ downloads table. Under a platform heading, don't start bullets with "Windows:" a
 - **A default and a backup.** Pick which plan answers, and which takes over when it hits its limit. It switches back after the reset. A key is never used as a backup.
 - **See your usage.** Keys & Plans shows what OpenClicky sent to each plan and how full each plan's limits are, with OpenClicky's rough share in orange on each bar.
 - **Updates come from this fork.**
+- **Agent tasks work without any setup beyond signing in to Codex.** The tool they use now comes with the app. If your computer has no Node.js, the app downloads it once when you have agent tasks set up.
+- **A more natural voice on offer.** The first-run tour offers Kokoro, a free voice that runs on your computer. It only downloads if you say yes.
 - **Keeps less on your computer.** Agent tasks and the screenshots saved with them are deleted after 14 days. Choose 7, 30 or 90 days, or Forever, in Settings → Privacy. Failed dictation audio now stops at 200 MB, and deleting a take deletes its audio.
 
 ### Mac

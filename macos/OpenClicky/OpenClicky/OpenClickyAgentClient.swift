@@ -59,9 +59,9 @@ struct OpenClickyAgentError: LocalizedError {
     let message: String
     var errorDescription: String? { message }
 
-    /// Said instead of env's "No such file or directory" when the agent tool isn't on this Mac
-    /// (the downloaded app doesn't carry it).
-    nonisolated static let toolMissingMessage = "agents run through the openclicky command-line tool, which isn't on this mac. questions, pointing and quick actions still work."
+    /// Said instead of env's "No such file or directory" when the agent tool can't run yet: the
+    /// app is still fetching Node (AgentTool), or couldn't.
+    nonisolated static let toolMissingMessage = "agent tasks are still setting up on this mac. try again in a minute. questions, pointing and quick actions still work."
 
     /// Whether `name` runs: an executable path, or a name found on `path` (the CLI's PATH).
     nonisolated static func toolResolves(_ name: String, path: String?) -> Bool {

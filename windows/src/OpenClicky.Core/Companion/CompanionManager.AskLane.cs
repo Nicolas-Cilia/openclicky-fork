@@ -159,10 +159,11 @@ public sealed partial class CompanionManager
         cancellationToken.ThrowIfCancellationRequested();
 
         // Two-tier routing: the gate decides whether this is a quick question (the ask lane below) or
-        // real work (the agent lane). The agent lane needs the openclicky tool; without it the quick
-        // actions are offered to whoever answers instead.
+        // real work (the agent lane). The agent lane needs the openclicky tool, which may still be
+        // waiting for Node (AgentTool); meanwhile the quick actions are offered to whoever answers.
         var agentLaneRuns = IsAgentModeEnabled && OpenClickyConfiguration.IsConfigured
             && ProviderCapabilities.Current().UsesAgent && openClickyAgentClient.IsToolInstalled;
+        if (ProviderCapabilities.Current().UsesAgent && !openClickyAgentClient.IsToolInstalled) _ = openClickyAgentClient.DownloadNodeIfNeededAsync();
         if (agentLaneRuns)
         {
             AgentActivityText = "deciding…";

@@ -20,7 +20,7 @@ import Speech
 import SwiftUI
 
 enum FirstRunTourStep: String {
-    case meet, dictate, talk, act, done
+    case meet, dictate, talk, act, voice, done
     /// Not part of the tour: asked once, after a few uses (`noteUse`).
     case openAtLogin
 
@@ -30,7 +30,7 @@ enum FirstRunTourStep: String {
         case .dictate: return 0
         case .talk: return 1
         case .act: return 2
-        case .meet, .done, .openAtLogin: return nil
+        case .meet, .voice, .done, .openAtLogin: return nil
         }
     }
 }
@@ -312,10 +312,17 @@ final class FirstRunTourController: ObservableObject {
         case .meet: go(to: .dictate)
         case .dictate: go(to: .talk)
         case .talk: go(to: .act)
-        case .act: go(to: .done)
+        case .act: go(to: Self.offersNaturalVoice(kokoroInstalled: KokoroVoice.isInstalled, speakingVoice: SpeechVoiceChoice.current(), kokoroSpeaksLanguage: KokoroVoice.speaker(forLanguage: ReplyLanguage.currentCode, picked: nil) != nil) ? .voice : .done)
+        case .voice: go(to: .done)
         case .done, .none: finish()
         case .openAtLogin: closeOpenAtLoginOffer()
         }
+    }
+
+    /// Offered once, near the end of the tour: only to someone still on this Mac's own voice, and
+    /// nothing downloads until they say yes.
+    nonisolated static func offersNaturalVoice(kokoroInstalled: Bool, speakingVoice: SpeechVoiceChoice, kokoroSpeaksLanguage: Bool) -> Bool {
+        !kokoroInstalled && speakingVoice == .mac && kokoroSpeaksLanguage
     }
 
     private func go(to newStep: FirstRunTourStep) {
@@ -354,6 +361,8 @@ final class FirstRunTourController: ObservableObject {
             }
         case .act:
             if OpenClickyConfiguration.isConfigured { companionManager?.recordedVoice.play(.tourAct) }
+        case .voice:
+            break
         case .done:
             companionManager?.recordedVoice.play(.tourDone)
         case .openAtLogin:
@@ -446,6 +455,12 @@ final class FirstRunTourController: ObservableObject {
             // set up to answer, "connect" opens the page where Claude or Codex is switched on.
             guard !OpenClickyConfiguration.isConfigured else { advance(); return }
             companionManager.showSettings(.keys)
+        case .voice:
+            // Kokoro speaks once it has arrived; this Mac's voice carries on until then.
+            OpenClickyConfiguration.update { $0.speechVoice = SpeechVoiceChoice.kokoro.storedValue }
+            ShellSettingsRevision.shared.noteChanged()
+            KokoroVoice.shared.download()
+            advance()
         case .done:
             companionManager.showSettings(.general)
             finish()
@@ -464,7 +479,7 @@ final class FirstRunTourController: ObservableObject {
         switch step {
         case .meet: finish()
         case .done: finish()
-        case .dictate, .talk, .act: advance()
+        case .dictate, .talk, .act, .voice: advance()
         case .openAtLogin: closeOpenAtLoginOffer()
         }
     }
@@ -511,6 +526,12 @@ final class FirstRunTourController: ObservableObject {
         let key = companionManager?.dictationSettings.dictationKey.keycapLabel ?? "fn"
         let canAsk = OpenClickyConfiguration.isConfigured
         switch step {
+        case .voice:
+            return FirstRunTourCard(
+                step: .voice, title: "want a more natural voice?",
+                detail: "kokoro is a free voice that runs on this mac, even offline. it’s a one-time \(KokoroVoice.downloadSizeText) download. you can change it any time in settings.",
+                symbol: "waveform",
+                primaryTitle: "download", secondaryTitle: "not now")
         case .meet:
             return FirstRunTourCard(
                 step: .meet, title: "hi, i’m clicky",

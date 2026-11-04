@@ -426,7 +426,11 @@ enum OpenClickyConfiguration {
         return candidates.first(where: isExecutable)
     }
 
-    static var cliCommand: [String] { settings.cliCommand }
+    /// What agent tasks run (AgentTool).
+    static var cliCommand: [String] {
+        AgentTool.command(configured: settings.cliCommand, bundledScript: AgentTool.bundledScript?.path,
+                          downloadedNode: AgentTool.downloadedNode, systemNode: AgentTool.systemNode)
+    }
     static var workspacePath: String { NSString(string: settings.workspace).expandingTildeInPath }
     /// The fast voice vendor the person picked in Settings → Clicky; nil is automatic.
     static var preferredRealtimeProvider: RealtimeVoiceProvider? {

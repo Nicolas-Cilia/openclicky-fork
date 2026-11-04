@@ -73,6 +73,8 @@ public enum FirstRunTourStep
     Dictate,
     Talk,
     Act,
+    /// <summary>Offers Kokoro, once, to someone still on this PC's own voice.</summary>
+    Voice,
     Done,
     /// <summary>Not part of the tour: asked once, after a few uses.</summary>
     OpenAtLogin,
@@ -148,6 +150,10 @@ public static class FirstRunTourCards
         var dictationKeyLabel = inputs.DictationKey.KeycapLabel();
         switch (step)
         {
+            case FirstRunTourStep.Voice:
+                return new FirstRunTourCard(step, "want a more natural voice?",
+                    $"kokoro is a free voice that runs on this pc, even offline. it’s a one-time {Speech.KokoroVoice.DownloadSizeText} download. you can change it any time in settings.",
+                    none, TourSymbols.Waveform, null, false, null, false, "download", "not now");
             case FirstRunTourStep.Meet:
                 return new FirstRunTourCard(step, "hi, i’m clicky",
                     "your pointer’s new sidekick. i’ll show you three things. it takes about a minute.",

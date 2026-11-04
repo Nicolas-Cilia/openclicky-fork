@@ -128,6 +128,10 @@ echo "▸ OpenClicky $VERSION (build $BUILD_NUMBER, $COMMIT) — signing as '$SI
 rm -rf "$EXPORT_DIR"
 mkdir -p "$EXPORT_DIR"
 
+# The tool agent tasks run through ships inside the app (scripts/embed-agent-tool.sh).
+echo "▸ building the agent tool"
+(cd "$APP_DIR/../.." && npm run build --silent -w agent)
+
 # 1. Build a Release app, signed. Signing here (not in an archive/export step) keeps the script
 #    dependency-free; hardened runtime is on so a Developer ID build can be notarized as-is.
 xcodebuild \
@@ -204,6 +208,8 @@ if [[ $SELF_MANAGED_SIGNING -eq 1 ]]; then
   done
   codesign --force --timestamp=none --entitlements "$APP_DIR/OpenClicky/OpenClicky.entitlements" --sign "$SIGN_IDENTITY" "$APP_PATH"
 fi
+
+[[ -f "$APP_PATH/Contents/Resources/agent-tool/agent/dist/cli.js" ]] || { echo "the agent tool isn't in the app" >&2; exit 1; }
 
 echo "▸ verifying signature"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
@@ -299,7 +305,11 @@ if [[ $PUBLISH -eq 1 ]]; then
     MAC_SIGNING="developer-id"
   fi
   node "$NOTES_SCRIPT" github "$VERSION" --platforms mac --mac-signing "$MAC_SIGNING" --repo "$GITHUB_REPO" > "$NOTES_FILE"
-  RELEASE_ASSETS=("$ZIP_PATH" "$DMG_PATH")
+  # A name that never changes, so https://github.com/<repo>/releases/latest/download/OpenClicky.dmg
+  # is always the newest build (the README's download button).
+  LATEST_DMG_PATH="$EXPORT_DIR/$APP_NAME.dmg"
+  cp "$DMG_PATH" "$LATEST_DMG_PATH"
+  RELEASE_ASSETS=("$ZIP_PATH" "$DMG_PATH" "$LATEST_DMG_PATH")
   [[ -n "$APPCAST_PATH" ]] && RELEASE_ASSETS+=("$APPCAST_PATH")
   if gh release view "$TAG" --repo "$GITHUB_REPO" >/dev/null 2>&1; then
     gh release upload "$TAG" "${RELEASE_ASSETS[@]}" --repo "$GITHUB_REPO" --clobber

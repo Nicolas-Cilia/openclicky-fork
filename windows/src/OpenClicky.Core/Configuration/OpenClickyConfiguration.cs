@@ -436,7 +436,9 @@ public static class OpenClickyConfiguration
         return CuaDriverCandidates.FirstOrDefault(check);
     }
 
-    public static IReadOnlyList<string> CliCommand => Settings.CliCommand;
+    /// <summary>What agent tasks run (AgentTool).</summary>
+    public static IReadOnlyList<string> CliCommand =>
+        Agent.AgentTool.Command(Settings.CliCommand, Agent.AgentTool.BundledScript, Agent.AgentTool.DownloadedNode, Agent.AgentTool.SystemNode);
     public static string WorkspacePath => OpenClickyPaths.ExpandTilde(Settings.Workspace);
     public static string? AgentModelOverride => string.IsNullOrEmpty(Settings.Model) ? null : Settings.Model;
 

@@ -1129,6 +1129,7 @@ final class CompanionManager: ObservableObject {
         agentSessionCleanupTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: AgentHousekeeping.firstCleanupDelayNanoseconds)
             while !Task.isCancelled {
+                if ProviderCapabilities.current().usesAgent { await AgentTool.downloadNodeIfNeeded() }
                 await self?.deleteExpiredAgentSessions()
                 try? await Task.sleep(nanoseconds: AgentHousekeeping.cleanupIntervalNanoseconds)
             }
@@ -1137,7 +1138,7 @@ final class CompanionManager: ObservableObject {
 
     func deleteExpiredAgentSessions() async {
         let days = AgentSessionLimit.days(stored: OpenClickyConfiguration.settings.agentSessionDays)
-        guard days > 0 else { return }
+        guard days > 0, OpenClickyAgentClient.isToolInstalled else { return }
         do {
             let deleted = try await openClickyAgentClient.pruneThreads(olderThanDays: days)
             if !deleted.isEmpty { AppLog.append("agent: deleted \(deleted.count) task(s) older than \(days) days") }
@@ -1827,10 +1828,13 @@ final class CompanionManager: ObservableObject {
 
                 // OpenClicky two-tier routing: the gate decides whether this is a quick question
                 // (teacher lane below: Claude + pointing) or real work (agent lane: Codex thread).
-                // The agent lane needs the openclicky tool (not in the downloaded app); without it the
-                // quick actions below are offered to whoever answers instead.
+                // The agent lane needs the openclicky tool, which may still be waiting for Node
+                // (AgentTool); meanwhile the quick actions below are offered to whoever answers.
                 let agentLaneRuns = isAgentModeEnabled && OpenClickyConfiguration.isConfigured
                     && ProviderCapabilities.current().usesAgent && OpenClickyAgentClient.isToolInstalled
+                if ProviderCapabilities.current().usesAgent && !OpenClickyAgentClient.isToolInstalled {
+                    Task.detached(priority: .utility) { await AgentTool.downloadNodeIfNeeded() }
+                }
                 if agentLaneRuns {
                     agentActivityText = "deciding…"
                     let lane = await openClickyAgentClient.classifyLane(for: transcript)

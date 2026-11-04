@@ -293,10 +293,18 @@ public sealed class FirstRunTourController
             case FirstRunTourStep.Meet: GoTo(FirstRunTourStep.Dictate); break;
             case FirstRunTourStep.Dictate: GoTo(FirstRunTourStep.Talk); break;
             case FirstRunTourStep.Talk: GoTo(FirstRunTourStep.Act); break;
-            case FirstRunTourStep.Act: GoTo(FirstRunTourStep.Done); break;
+            case FirstRunTourStep.Act:
+                GoTo(OffersNaturalVoice(KokoroVoice.IsInstalled, SpeechVoiceChoices.Current(), KokoroVoice.SpeakerFor(ReplyLanguage.CurrentCode, null) is not null)
+                    ? FirstRunTourStep.Voice : FirstRunTourStep.Done);
+                break;
+            case FirstRunTourStep.Voice: GoTo(FirstRunTourStep.Done); break;
             default: Finish(); break;
         }
     }
+
+    /// <summary>Offered once, near the end of the tour: only to someone still on this PC's own voice, and nothing downloads until they say yes.</summary>
+    public static bool OffersNaturalVoice(bool kokoroInstalled, SpeechVoiceChoice speakingVoice, bool kokoroSpeaksLanguage) =>
+        !kokoroInstalled && speakingVoice == SpeechVoiceChoice.Mac && kokoroSpeaksLanguage;
 
     private void GoTo(FirstRunTourStep newStep)
     {
@@ -424,6 +432,12 @@ public sealed class FirstRunTourController
                 // Nothing set up to answer: "connect" opens the page where Claude or Codex is switched on.
                 companion.ShowSettings(DictationSettingsPage.Keys);
                 break;
+            case FirstRunTourStep.Voice:
+                // Kokoro speaks once it has arrived; this PC's voice carries on until then.
+                OpenClickyConfiguration.Update(settings => settings.SpeechVoice = SpeechVoiceChoice.Kokoro.StoredValue());
+                KokoroVoice.Shared?.Download();
+                Advance();
+                break;
             case FirstRunTourStep.Done:
                 companion.ShowSettings(DictationSettingsPage.General);
                 Finish();
@@ -523,6 +537,7 @@ public sealed class FirstRunTourController
         FirstRunTourStep.Dictate => "dictate",
         FirstRunTourStep.Talk => "talk",
         FirstRunTourStep.Act => "act",
+        FirstRunTourStep.Voice => "voice",
         FirstRunTourStep.Done => "done",
         _ => "openAtLogin",
     };
@@ -533,6 +548,7 @@ public sealed class FirstRunTourController
         "dictate" => FirstRunTourStep.Dictate,
         "talk" => FirstRunTourStep.Talk,
         "act" => FirstRunTourStep.Act,
+        "voice" => FirstRunTourStep.Voice,
         "done" => FirstRunTourStep.Done,
         "openAtLogin" => FirstRunTourStep.OpenAtLogin,
         _ => null,
