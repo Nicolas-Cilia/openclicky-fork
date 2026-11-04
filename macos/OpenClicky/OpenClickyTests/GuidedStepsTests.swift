@@ -132,9 +132,23 @@ struct GuidedStepsTests {
         }
     }
 
+    @Test func theWaysPeopleActuallySayItMoveTheGuideOn() {
+        for spokenWords in ["okay I did that, what's next", "I've done that", "ok that's done, next step", "yep, all done", "finished, what now",
+                            "I clicked it, what do I do next?", "what's the next step", "alright I did it and what should I do next"] {
+            #expect(GuidedStepContinuePhrase.isContinue(spokenWords), "\(spokenWords)")
+        }
+    }
+
+    @Test func aRealQuestionWithContinueWordsInItIsStillAQuestion() {
+        for spokenWords in ["i did that but nothing happened", "what's next to the save button", "done with what",
+                            "i clicked it and it says error", "go ahead and delete this file", "ready to print this how do i do that"] {
+            #expect(!GuidedStepContinuePhrase.isContinue(spokenWords), "\(spokenWords)")
+        }
+    }
+
     @Test func aRealQuestionIsNotAContinue() {
         for spokenWords in ["", "okay", "what does this button do", "what's the next tab over", "continue the email i was writing",
-                            "how do i get back to the previous step", "next to the save button what is that icon", "wait"] {
+                            "now", "what", "how do i get back to the previous step", "next to the save button what is that icon", "wait"] {
             #expect(!GuidedStepContinuePhrase.isContinue(spokenWords), "\(spokenWords)")
         }
     }

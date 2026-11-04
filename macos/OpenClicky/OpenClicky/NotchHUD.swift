@@ -1735,11 +1735,11 @@ struct NotchCompactStatusView: View {
     private var statusText: String {
         // A word from the ask lane that matters more than its state ("sending your screen · esc to cancel").
         if let askIslandStatus = companionManager.askIslandStatus { return askIslandStatus }
-        if let guideStep = companionManager.guideStepUnderWay {
+        if companionManager.guideStepUnderWay != nil {
             switch companionManager.voiceState {
-            case .processing: return "step \(guideStep + 1) · looking"
-            case .idle: return "step \(guideStep) · your turn"
-            default: return "step \(guideStep)"
+            case .processing: return "looking"
+            case .idle: return "your turn"
+            default: return "guiding"
             }
         }
         let isDictating = companionManager.isDictatingToFrontApp
