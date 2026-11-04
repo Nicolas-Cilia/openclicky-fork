@@ -1305,8 +1305,8 @@ final class CompanionManager: ObservableObject {
     /// Opened at General for the first time after the welcome tour, it plays the Settings tour once.
     func showSettings(_ page: DictationSettingsPage = .general) {
         showDictationWindow(settingsPage: page)
-        if page == .general, firstRunTour.isFinished, !SettingsTourController.hasPlayed {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.startSettingsTour() }
+        if SettingsTourController.startsOnItsOwn(page: page, welcomeTourIsFinished: firstRunTour.isFinished, hasPlayed: SettingsTourController.hasPlayed) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.startSettingsTour() }
         }
     }
 

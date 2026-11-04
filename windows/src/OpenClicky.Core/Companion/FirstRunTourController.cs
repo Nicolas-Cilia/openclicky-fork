@@ -443,8 +443,9 @@ public sealed class FirstRunTourController
                 Advance();
                 break;
             case FirstRunTourStep.Done:
-                companion.ShowSettings(DictationSettingsPage.General);
+                // Finished first: Settings only starts its own tour once this one is done.
                 Finish();
+                companion.ShowSettings(DictationSettingsPage.General);
                 break;
             case FirstRunTourStep.OpenAtLogin:
                 var isOn = companion.SetOpenAtLogin(true);
