@@ -947,7 +947,7 @@ public sealed class DesktopActionRunner
         if (!executor.SpotifyIsInstalled()) return new DesktopActionOutcome.SpotifyNotInstalled();
         if (!executor.SpotifyIsRunning() && !await executor.LaunchSpotifyAsync().ConfigureAwait(false)) return new DesktopActionOutcome.SpotifyStarting();
         var tracks = await extras.LookUpTrack(query).ConfigureAwait(false);
-        // No lookup answered, or it answered with something that is not a track (the backend is not
+        // No lookup answered, or it answered with something that is not a track (the service is not
         // trusted with what Spotify is told to open): Spotify's own search leaves the person one click away.
         if (MusicTrackPicker.Pick(tracks, query) is not { } track || !track.Uri.StartsWith("spotify:track:", StringComparison.Ordinal))
         {

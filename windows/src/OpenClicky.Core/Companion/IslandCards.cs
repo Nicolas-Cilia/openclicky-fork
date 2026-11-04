@@ -73,16 +73,9 @@ public enum FirstRunTourStep
     Dictate,
     Talk,
     Act,
-    Account,
     Done,
     /// <summary>Not part of the tour: asked once, after a few uses.</summary>
     OpenAtLogin,
-}
-
-public enum FirstRunTourFieldKind
-{
-    Email,
-    Code,
 }
 
 /// <summary>What the island's tour card shows.</summary>
@@ -100,7 +93,6 @@ public sealed record FirstRunTourCard(
     bool StatusIsGood,
     string? MicrophoneName,
     bool MicrophoneNeedsAttention,
-    FirstRunTourFieldKind? Field,
     string? PrimaryTitle,
     string SecondaryTitle)
 {
@@ -116,10 +108,10 @@ public sealed record FirstRunTourCard(
     public bool Equals(FirstRunTourCard? other) =>
         other is not null && Step == other.Step && Title == other.Title && Detail == other.Detail && Keys.SequenceEqual(other.Keys)
         && Symbol == other.Symbol && Status == other.Status && StatusIsGood == other.StatusIsGood && MicrophoneName == other.MicrophoneName
-        && MicrophoneNeedsAttention == other.MicrophoneNeedsAttention && Field == other.Field && PrimaryTitle == other.PrimaryTitle
+        && MicrophoneNeedsAttention == other.MicrophoneNeedsAttention && PrimaryTitle == other.PrimaryTitle
         && SecondaryTitle == other.SecondaryTitle;
 
-    public override int GetHashCode() => HashCode.Combine(Step, Title, Status, Field);
+    public override int GetHashCode() => HashCode.Combine(Step, Title, Status);
 }
 
 /// <summary>The tour's symbols (the Mac's SF Symbols); the island maps each to a Segoe Fluent Icons glyph.</summary>
@@ -140,8 +132,6 @@ public sealed record FirstRunTourCardInputs(
     bool CanAsk,
     bool UsesAgent,
     bool IsShowingDemo = false,
-    bool AccountCardAsksForEmail = false,
-    bool NeedsCode = false,
     string? Status = null,
     bool StatusIsGood = false,
     string? MicrophoneName = null,
@@ -161,7 +151,7 @@ public static class FirstRunTourCards
             case FirstRunTourStep.Meet:
                 return new FirstRunTourCard(step, "hi, i’m clicky",
                     "your pointer’s new sidekick. i’ll show you three things. it takes about a minute.",
-                    none, TourSymbols.Wave, null, false, null, false, null, "let’s go", "skip tour");
+                    none, TourSymbols.Wave, null, false, null, false, "let’s go", "skip tour");
             case FirstRunTourStep.Dictate:
                 // Many laptops have no right Ctrl; right Alt (beside the space bar) works from its first press.
                 return new FirstRunTourCard(step,
@@ -170,47 +160,37 @@ public static class FirstRunTourCards
                         ? "no right ctrl? right alt is just right of the space bar. try “hello openclicky, this is my first take”, then let go."
                         : "try “hello openclicky, this is my first take”, then let go.",
                     new[] { IslandTexts.ShortKeycapLabel(inputs.DictationKey) }, null, inputs.Status, inputs.StatusIsGood,
-                    inputs.MicrophoneName, inputs.OffersMicrophoneChange, null,
+                    inputs.MicrophoneName, inputs.OffersMicrophoneChange,
                     inputs.SuggestsBuiltInMicrophone ? "use built-in mic" : null, "skip");
-            case FirstRunTourStep.Account when inputs.AccountCardAsksForEmail:
-                return new FirstRunTourCard(step, "switch on asking",
-                    "add your email for a free account and i’ll answer questions and do things for you. no password.",
-                    none, TourSymbols.Envelope, inputs.Status, inputs.StatusIsGood, null, false,
-                    inputs.NeedsCode ? FirstRunTourFieldKind.Code : FirstRunTourFieldKind.Email,
-                    inputs.NeedsCode ? "confirm" : "start", "skip");
-            case FirstRunTourStep.Account:
-                return new FirstRunTourCard(step, "you’re on a free account",
-                    "it has a limited number of free credits. if you already pay for openai, claude or another ai, add that key in settings and use it right here.",
-                    none, TourSymbols.Sparkles, null, false, null, false, null, "add my key", "continue");
             case FirstRunTourStep.Talk when inputs.IsShowingDemo:
                 return new FirstRunTourCard(step, "watch this",
                     "i’m looking at your screen. i’ll point at something and tell you about it.",
-                    none, TourSymbols.Eye, null, false, null, false, null, null, "skip");
+                    none, TourSymbols.Eye, null, false, null, false, null, "skip");
             case FirstRunTourStep.Talk:
                 return new FirstRunTourCard(step, inputs.CanAsk ? "your turn: ask me something" : "you can ask me things too",
                     inputs.CanAsk
                         ? $"hold {inputs.DictationKey.TalkKeysText()} and ask “what’s this?” about anything on your screen. i answer out loud and point."
-                        : "about anything on your screen, out loud, and i’ll point at it. add your email to switch it on, free.",
-                    inputs.DictationKey.TalkKeycapLabels(), null, inputs.Status, inputs.StatusIsGood, null, false, null,
-                    inputs.CanAsk ? "next" : "add email", "skip");
+                        : "about anything on your screen, out loud, and i’ll point at it. connect claude or codex in settings to switch it on.",
+                    inputs.DictationKey.TalkKeycapLabels(), null, inputs.Status, inputs.StatusIsGood, null, false,
+                    inputs.CanAsk ? "next" : "connect", "skip");
             case FirstRunTourStep.Act:
                 return new FirstRunTourCard(step, inputs.CanAsk ? "hand me a task" : "i can do things for you too",
-                    inputs.CanAsk ? TaskExamples(inputs.UsesAgent, inputs.DictationKey) : "open apps, make folders, and more, just by asking. add your email to switch it on, free.",
-                    inputs.DictationKey.TalkKeycapLabels(), null, inputs.Status, inputs.StatusIsGood, null, false, null,
-                    inputs.CanAsk ? "next" : "add email", "skip");
+                    inputs.CanAsk ? TaskExamples(inputs.UsesAgent, inputs.DictationKey) : "open apps, make folders, and more, just by asking. connect claude or codex in settings to switch it on.",
+                    inputs.DictationKey.TalkKeycapLabels(), null, inputs.Status, inputs.StatusIsGood, null, false,
+                    inputs.CanAsk ? "next" : "connect", "skip");
             case FirstRunTourStep.Done:
                 return new FirstRunTourCard(step, "you’re all set",
                     "hover the island at the top any time. keys, microphone and the rest live in settings.",
-                    none, TourSymbols.Checkmark, null, false, null, false, null, "open settings", "done");
+                    none, TourSymbols.Checkmark, null, false, null, false, "open settings", "done");
             default:
                 return new FirstRunTourCard(step, "open me when your pc starts?",
                     $"then {dictationKeyLabel} works from the moment you sign in, without opening me first.",
-                    none, TourSymbols.Power, inputs.Status, inputs.StatusIsGood, null, false, null,
+                    none, TourSymbols.Power, inputs.Status, inputs.StatusIsGood, null, false,
                     inputs.StatusIsGood ? null : "yes, open at sign-in", inputs.StatusIsGood ? "close" : "not now");
         }
     }
 
-    /// <summary>What to try on the task step: the agent (own keys) works in apps; a free account has the quick actions.</summary>
+    /// <summary>What to try on the task step: the agent works in apps; without it there are the quick actions.</summary>
     public static string TaskExamples(bool usesAgent, DictationHotkey dictationKey = DictationHotkeys.Default) => usesAgent
         ? $"hold {dictationKey.TalkKeysText()} and say “add a note to my notes: buy milk”, or “organize my downloads folder so it’s easier to find things”."
         : $"hold {dictationKey.TalkKeysText()} and say “make a folder on my desktop called hello clicky”, or “open notepad”.";

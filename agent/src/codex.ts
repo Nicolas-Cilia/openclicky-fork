@@ -14,6 +14,14 @@ export interface RunResult {
   finalMessage: string;
   artifacts: string[];
   error?: string;
+  /** Tokens this turn used, when Codex reported them. `inputTokens` includes the cached ones. */
+  usage?: TurnTokenUsage;
+}
+
+export interface TurnTokenUsage {
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
 }
 
 export interface RunOptions {
@@ -64,11 +72,10 @@ const WINDOWS_ENV_ALLOWLIST = [
  * command that agent runs. This carries: the shell/runtime variables above; any `NODE_*` variable
  * (NODE_OPTIONS, NODE_EXTRA_CA_CERTS, etc. — Node's own tooling, including Codex's, reads these);
  * proxy configuration; and the OpenClicky variables config.toml actually references — set explicitly
- * from `cfg` rather than trusted from the shell: `CODEX_HOME`, `OPENCLICKY_SESSION_TOKEN` (env_key
- * for model_providers.openclicky), `OPENCLICKY_OPENAI_KEY` / `OPENCLICKY_ANTHROPIC_KEY`
- * (env_http_headers, bring-your-own-key), and `COMPOSIO_API_KEY` (mcp_servers.composio's consumer
- * key — see codexHome.ts). Provider keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, …) are never on this
- * list: Codex must always go through the OpenClicky backend, never see them directly.
+ * from `cfg` rather than trusted from the shell: `CODEX_HOME`, `OPENCLICKY_OPENAI_KEY` (env_key for
+ * model_providers.openclicky, own key only), and `COMPOSIO_API_KEY` (mcp_servers.composio's consumer
+ * key — see codexHome.ts). The shell's provider keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, …) are never on
+ * this list: a run uses the key set for OpenClicky or the ChatGPT sign-in, nothing else.
  */
 export function buildChildEnv(cfg: AgentConfig, sourceEnv: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
@@ -79,12 +86,19 @@ export function buildChildEnv(cfg: AgentConfig, sourceEnv: NodeJS.ProcessEnv = p
     if (key.startsWith("NODE_") && value !== undefined) env[key] = value;
   }
   env.CODEX_HOME = cfg.codexHome;
-  env.OPENCLICKY_SESSION_TOKEN = cfg.token ?? "";
-  // Bring your own key: the Codex config forwards these as headers (env_http_headers); unset = not sent.
   if (cfg.openaiApiKey) env.OPENCLICKY_OPENAI_KEY = cfg.openaiApiKey;
-  if (cfg.anthropicApiKey) env.OPENCLICKY_ANTHROPIC_KEY = cfg.anthropicApiKey;
   if (cfg.composioApiKey) env.COMPOSIO_API_KEY = cfg.composioApiKey;
   return env;
+}
+
+/** Adds one model call's counts (`thread/tokenUsage/updated`'s `last`) to the turn's. */
+export function addTokenUsage(sum: TurnTokenUsage | undefined, last: Partial<TurnTokenUsage> | undefined): TurnTokenUsage | undefined {
+  if (!last) return sum;
+  return {
+    inputTokens: (sum?.inputTokens ?? 0) + (last.inputTokens ?? 0),
+    cachedInputTokens: (sum?.cachedInputTokens ?? 0) + (last.cachedInputTokens ?? 0),
+    outputTokens: (sum?.outputTokens ?? 0) + (last.outputTokens ?? 0),
+  };
 }
 
 export type ApprovalKind = "command" | "fileChange" | "permissions";
@@ -252,6 +266,7 @@ export class CodexAgent {
     const items: unknown[] = [];
     let finalMessage = "";
     let errorMessage: string | undefined;
+    let usage: TurnTokenUsage | undefined;
 
     let off: () => void = () => {};
     const done = new Promise<any>((resolve) => {
@@ -271,6 +286,9 @@ export class CodexAgent {
           case "error":
             errorMessage = params.error?.message ?? String(params.error);
             this.log(`error: ${errorMessage}${params.willRetry ? " (retrying)" : ""}`);
+            break;
+          case "thread/tokenUsage/updated":
+            usage = addTokenUsage(usage, params.tokenUsage?.last);
             break;
           case "turn/completed":
             resolve(params.turn);
@@ -298,6 +316,7 @@ export class CodexAgent {
       turnId: turn.id,
       status: completed.status,
       finalMessage,
+      ...(usage ? { usage } : {}),
       artifacts,
       // A retried "error" notification (willRetry: true) describes a transient hiccup Codex already
       // recovered from by the time the turn reports success; surfacing it on a completed result would

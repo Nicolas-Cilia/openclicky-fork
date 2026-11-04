@@ -3,7 +3,7 @@
 //  OpenClicky
 //
 //  Upload transcription on OpenAI's audio transcription API: the take is buffered and sent as one
-//  WAV on release, straight to OpenAI on the person's own key or through the OpenClicky backend.
+//  WAV on release, straight to OpenAI on the person's own key.
 //
 
 import AVFoundation
@@ -18,10 +18,8 @@ struct OpenAIAudioTranscriptionProviderError: LocalizedError {
 }
 
 final class OpenAIAudioTranscriptionProvider: BuddyTranscriptionProvider {
-    // `ProviderRouter` decides where each upload goes: with the person's own OpenAI key, straight to
-    // OpenAI's /audio/transcriptions; otherwise through the OpenClicky backend (POST
-    // /agent/transcribe) on the account's token, where OpenClicky's key and model choice are used.
-    let displayName = "OpenClicky"
+    // Each upload goes straight to OpenAI's /audio/transcriptions on the person's own key.
+    let displayName = "OpenAI"
     let requiresSpeechRecognitionPermission = false
     /// The language to transcribe in (a bare code such as "hi"); nil lets the model detect it. Read
     /// when a take starts, on the main actor where the settings live. Dictation passes the styles
@@ -32,7 +30,7 @@ final class OpenAIAudioTranscriptionProvider: BuddyTranscriptionProvider {
         self.language = language
     }
 
-    /// An own OpenAI key (straight to OpenAI) or an account (the backend).
+    /// An own OpenAI key.
     var isConfigured: Bool {
         unavailableExplanation == nil
     }
@@ -86,14 +84,6 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
         let text: String
     }
 
-    /// `backendBaseURL` is user-configurable (shell.json or an environment override), not a
-    /// compile-time literal, so a malformed value must throw instead of crashing the app.
-    private static func transcriptionURL() throws -> URL {
-        guard let url = URL(string: "\(OpenClickyConfiguration.backendBaseURL)/agent/transcribe") else {
-            throw OpenAIAudioTranscriptionProviderError(message: "OpenClicky backend URL is invalid.")
-        }
-        return url
-    }
     private static let targetSampleRate = 16_000
 
     private let keyterms: [String]
@@ -228,8 +218,7 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
         let response: URLResponse
         switch ProviderRouter.current(for: .transcription) {
         case .openAIDirect:
-            // The person's own OpenAI key: the multipart upload the backend would have built, sent
-            // to OpenAI itself. The answer is the same `{ "text": … }`.
+            // The person's own OpenAI key: a multipart upload, answered with `{ "text": … }`.
             guard let openAIKey = ProviderRouter.currentCredentials().openAIKey else {
                 throw OpenAIAudioTranscriptionProviderError(message: ProviderRouter.needsOpenAIKeySentence)
             }
@@ -238,37 +227,20 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
             (responseData, response) = try await urlSession.data(for: request)
         case .unavailable(let sentence):
             throw OpenAIAudioTranscriptionProviderError(message: sentence)
-        case .backend, .anthropicDirect, .answerProvider:
-            var request = URLRequest(url: try Self.transcriptionURL())
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            OpenClickyConfiguration.authorize(&request)
-
-            var requestBody: [String: Any] = [
-                "audio": wavAudioData.base64EncodedString(),
-                "mime": "audio/wav"
-            ]
-            if let language, !language.isEmpty {
-                requestBody["language"] = language
-            }
-            if let contextualPrompt = transcriptionPromptText() {
-                requestBody["prompt"] = contextualPrompt
-            }
-            request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
-
-            (responseData, response) = try await BackendSignIn.send(request) { [urlSession] in try await urlSession.data(for: $0) }
+        case .anthropicDirect, .answerProvider:
+            throw OpenAIAudioTranscriptionProviderError(message: ProviderRouter.needsOpenAIKeySentence)
         }
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw OpenAIAudioTranscriptionProviderError(
-                message: "OpenClicky transcription returned an invalid response."
+                message: "OpenAI transcription returned an invalid response."
             )
         }
 
         guard (200...299).contains(httpResponse.statusCode) else {
             let responseText = String(data: responseData, encoding: .utf8) ?? "Unknown error"
             throw OpenAIAudioTranscriptionProviderError(
-                message: "OpenClicky transcription failed (HTTP \(httpResponse.statusCode)): \(responseText)"
+                message: "OpenAI transcription failed (HTTP \(httpResponse.statusCode)): \(responseText)"
             )
         }
 
@@ -280,7 +252,7 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
         }
 
         throw OpenAIAudioTranscriptionProviderError(
-            message: "OpenClicky transcription returned an empty transcript."
+            message: "OpenAI transcription returned an empty transcript."
         )
     }
 

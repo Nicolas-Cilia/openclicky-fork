@@ -44,15 +44,15 @@ describe("parseSseStream", () => {
 });
 
 describe("ask", () => {
-  it("streams an answer through the backend with the bearer token", async () => {
-    const cfg = resolveConfig({ backendUrl: url, token: "good" });
+  it("streams an answer straight to OpenAI on the own key", async () => {
+    const cfg = resolveConfig({ openaiBaseUrl: `${url}/v1`, openaiApiKey: "good" });
     const deltas: string[] = [];
     const answer = await ask(cfg, "say hi", { onDelta: (d) => deltas.push(d) });
     expect(answer).toBe("Hello world");
     expect(deltas.join("")).toBe("Hello world");
     const last = seen.at(-1)!;
     expect(last.auth).toBe("Bearer good");
-    expect(last.body.model).toBe("default");
+    expect(last.body.model).toBe("gpt-5.5");
     expect(last.body.stream).toBe(true);
     expect(last.body.messages.at(-1)).toEqual({ role: "user", content: "say hi" });
   });
@@ -61,7 +61,7 @@ describe("ask", () => {
     const img = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "oc-img-")), "shot.png");
     fs.writeFileSync(img, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
     expect(imageToDataUrl(img)).toBe("data:image/png;base64,iVBORw==");
-    const cfg = resolveConfig({ backendUrl: url, token: "good" });
+    const cfg = resolveConfig({ openaiBaseUrl: `${url}/v1`, openaiApiKey: "good" });
     await ask(cfg, "what is this", { imagePath: img });
     const content = seen.at(-1)!.body.messages.at(-1).content;
     expect(content[0]).toEqual({ type: "text", text: "what is this" });
@@ -69,11 +69,11 @@ describe("ask", () => {
   });
 
   it("throws on non-2xx with the body", async () => {
-    const cfg = resolveConfig({ backendUrl: url, token: "bad" });
-    await expect(ask(cfg, "x")).rejects.toThrow(/backend 401: .*nope/);
+    const cfg = resolveConfig({ openaiBaseUrl: `${url}/v1`, openaiApiKey: "bad" });
+    await expect(ask(cfg, "x")).rejects.toThrow(/openai 401: .*nope/);
   });
 
-  it("refuses to run without a token", async () => {
-    await expect(ask(resolveConfig({ backendUrl: url, token: undefined }, {}), "x")).rejects.toThrow(/needs your own OpenAI key/);
+  it("refuses to run without a key", async () => {
+    await expect(ask(resolveConfig({ openaiBaseUrl: `${url}/v1`, openaiApiKey: undefined }, {}), "x")).rejects.toThrow(/needs your own OpenAI key/);
   });
 });

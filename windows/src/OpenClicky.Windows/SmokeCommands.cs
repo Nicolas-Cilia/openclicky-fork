@@ -3,7 +3,7 @@
 //
 //   --openclicky-platform-smoke                    the OS layer on this PC (Platform/PlatformSmoke)
 //   --openclicky-smoke-run "<text>"                gate + agent run through the openclicky CLI
-//   --openclicky-smoke-transcribe <wav> [engine]   one dictation engine on a recording (moonshine, offline, parakeet, sarvam, openclicky, assemblyai)
+//   --openclicky-smoke-transcribe <wav> [engine]   one dictation engine on a recording (moonshine, offline, parakeet, sarvam, openclicky)
 //   --openclicky-voice-smoke <voice> [--play]      two sentences rendered in one voice (SpeechVoiceChoice raw value); --play plays them
 //   --openclicky-mic-smoke <seconds> [engine]      records the microphone, prints its level, saves a WAV and transcribes it
 //   --openclicky-check-source <source>             Settings' Test button for one answer source
@@ -156,7 +156,7 @@ internal static class SmokeCommands
         return all.ToArray();
     }
 
-    /// <summary>A recording through standard hands-free's own detector and the on-device hearing a free account uses,
+    /// <summary>A recording through standard hands-free's own detector and the on-device hearing a plan-only PC uses,
     /// the way CompanionManager.StandardHandsFree asks each turn (the Mac's --openclicky-smoke-handsfree-file).</summary>
     private static async Task<int> HandsFreeFileAsync(string wavPath, double volume, bool raisesQuietTurns)
     {
@@ -371,7 +371,7 @@ internal static class SmokeCommands
     {
         var route = ProviderRouter.Current(ProviderCapability.Claude);
         Console.WriteLine($"answer-smoke: route {route.LogName}");
-        var api = new ClaudeAPI(() => $"{OpenClickyConfiguration.BackendBaseUrl}/chat");
+        var api = new ClaudeAPI();
         var chunks = 0;
         try
         {

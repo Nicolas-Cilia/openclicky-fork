@@ -1,3 +1,4 @@
+import { linkCodexLogin, renderProviderBlock } from "../src/codexHome.js";
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
@@ -5,19 +6,20 @@ import path from "node:path";
 import { renderCodexConfig, renderMcpServers, renderSandboxWritableRoots, ensureCodexHome } from "../src/codexHome.js";
 import { resolveConfig } from "../src/config.js";
 
-const tpl = `{{MODEL_LINE}}\nbase_url = "{{BACKEND_URL}}/v1"\npath = "{{OPENCLICKY_ROOT}}/skills"\n[projects."{{WORKSPACE}}"]\n`;
+const tpl = `{{MODEL_LINE}}\n{{MODEL_PROVIDER_LINE}}\n{{MODEL_PROVIDER_BLOCK}}\npath = "{{OPENCLICKY_ROOT}}/skills"\n[projects."{{WORKSPACE}}"]\n`;
 
 describe("renderCodexConfig", () => {
   it("fills placeholders and omits model line when unset", () => {
-    const out = renderCodexConfig(tpl, { root: "/r", backendUrl: "http://x/", workspace: "/w", userSkillsActive: "/u/active" });
-    expect(out).toContain('base_url = "http://x/v1"');
+    const out = renderCodexConfig(tpl, { root: "/r", workspace: "/w", userSkillsActive: "/u/active" });
+    expect(out).toContain('model_provider = "openai"');
+    expect(out).not.toContain("env_key");
     expect(out).toContain('path = "/r/skills"');
     expect(out).toContain('[projects."/w"]');
     expect(out).not.toContain("{{");
     expect(out).not.toMatch(/^model = /m);
   });
   it("emits model line when set", () => {
-    const out = renderCodexConfig(tpl, { root: "/r", backendUrl: "http://x", workspace: "/w", model: "gpt-5.6-luna", userSkillsActive: "/u/active" });
+    const out = renderCodexConfig(tpl, { root: "/r", workspace: "/w", model: "gpt-5.6-luna", userSkillsActive: "/u/active" });
     expect(out).toMatch(/^model = "gpt-5.6-luna"/m);
   });
 });
@@ -25,7 +27,7 @@ describe("renderCodexConfig", () => {
 describe("renderMcpServers", () => {
   it("renders nothing by default", () => {
     expect(renderMcpServers({})).toBe("");
-    expect(renderCodexConfig("a\n{{MCP_SERVERS}}\nb", { root: "/r", backendUrl: "x", workspace: "/w", userSkillsActive: "/u/active" })).toBe("a\n\nb");
+    expect(renderCodexConfig("a\n{{MCP_SERVERS}}\nb", { root: "/r", workspace: "/w", userSkillsActive: "/u/active" })).toBe("a\n\nb");
   });
   it("renders composio and computer-use blocks when configured", () => {
     const out = renderMcpServers({ composioMcpUrl: "https://mcp.example/composio", cuaDriverBin: "/opt/cua-driver" });
@@ -54,7 +56,7 @@ describe("renderSandboxWritableRoots", () => {
   });
   it("is filled into the template through its own placeholder", () => {
     const out = renderCodexConfig("a\n{{SANDBOX_WRITABLE_ROOTS}}\nb", {
-      root: "/r", backendUrl: "x", workspace: "/w", userSkillsActive: "/u/active", writableRoots: ["/Users/x"],
+      root: "/r", workspace: "/w", userSkillsActive: "/u/active", writableRoots: ["/Users/x"],
     });
     expect(out).toContain('writable_roots = ["/Users/x"]');
     expect(out).not.toContain("{{");
@@ -82,10 +84,11 @@ describe("writable roots configuration", () => {
 describe("ensureCodexHome", () => {
   it("writes config.toml from the real template", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "oc-home-"));
-    const cfg = resolveConfig({ codexHome: home, backendUrl: "http://127.0.0.1:1", workspace: "/tmp/ws" });
+    const cfg = resolveConfig({ codexHome: home, workspace: "/tmp/ws" });
     const { configPath } = ensureCodexHome(cfg);
     const text = fs.readFileSync(configPath, "utf8");
-    expect(text).toContain('base_url = "http://127.0.0.1:1/v1"');
+    expect(text).toContain('model_provider = "openai"');
+    expect(text).not.toContain("[model_providers.openclicky]");
     expect(text).toContain(`model_instructions_file = "${cfg.root}/skills/ModelInstructions.md"`);
     expect(text).toContain(`path = "${cfg.root}/skills"`);
     expect(text).toContain('[projects."/tmp/ws"]');
@@ -95,7 +98,7 @@ describe("ensureCodexHome", () => {
   });
   it("includes MCP servers from config", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "oc-home-"));
-    const cfg = resolveConfig({ codexHome: home, backendUrl: "http://127.0.0.1:1", workspace: "/tmp/ws", composioMcpUrl: "https://mcp.example/c", cuaDriverBin: "/opt/cua" });
+    const cfg = resolveConfig({ codexHome: home, workspace: "/tmp/ws", composioMcpUrl: "https://mcp.example/c", cuaDriverBin: "/opt/cua" });
     const text = fs.readFileSync(ensureCodexHome(cfg).configPath, "utf8");
     expect(text).toMatch(/^\[mcp_servers\.composio\]\nurl = "https:\/\/mcp\.example\/c"/m);
     expect(text).toMatch(/^\[mcp_servers\.computer-use\]\ncommand = "\/opt\/cua"/m);
@@ -103,7 +106,7 @@ describe("ensureCodexHome", () => {
   it("renders the user skills active dir and creates it", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "oc-home-"));
     const userSkillsDir = fs.mkdtempSync(path.join(os.tmpdir(), "oc-user-skills-"));
-    const cfg = resolveConfig({ codexHome: home, backendUrl: "http://127.0.0.1:1", workspace: "/tmp/ws", userSkillsDir });
+    const cfg = resolveConfig({ codexHome: home, workspace: "/tmp/ws", userSkillsDir });
     const text = fs.readFileSync(ensureCodexHome(cfg).configPath, "utf8");
     expect(text).toContain(`path = "${path.join(userSkillsDir, "active")}"`);
     expect(fs.existsSync(path.join(userSkillsDir, "active"))).toBe(true);
@@ -116,7 +119,7 @@ describe("ensureCodexHome", () => {
     const orig = process.stderr.write;
     process.stderr.write = ((chunk: string | Uint8Array) => { warnings.push(String(chunk)); return true; });
     try {
-      const cfg = resolveConfig({ codexHome: home, backendUrl: "http://127.0.0.1:1", workspace: "/tmp/ws", userSkillsDir });
+      const cfg = resolveConfig({ codexHome: home, workspace: "/tmp/ws", userSkillsDir });
       const text = fs.readFileSync(ensureCodexHome(cfg).configPath, "utf8");
       expect(text).toContain(`path = "${path.join(userSkillsDir, "active")}"`);
     } finally {
@@ -133,7 +136,7 @@ describe("path escaping", () => {
   const tricky = '/tmp/oc "quoted" \\ dir';
 
   it("escapes a root containing a quote and a backslash so the skills path still parses to the same value", () => {
-    const out = renderCodexConfig(tpl, { root: tricky, backendUrl: "http://x", workspace: "/w", userSkillsActive: "/u/active" });
+    const out = renderCodexConfig(tpl, { root: tricky, workspace: "/w", userSkillsActive: "/u/active" });
     const m = out.match(/path = "((?:[^"\\]|\\.)*)"/);
     expect(m).not.toBeNull();
     expect(JSON.parse(`"${m![1]}"`)).toBe(`${tricky}/skills`);
@@ -142,7 +145,7 @@ describe("path escaping", () => {
   });
 
   it("escapes a workspace containing a quote and a backslash so [projects.\"...\"] still parses to the same value", () => {
-    const out = renderCodexConfig(tpl, { root: "/r", backendUrl: "http://x", workspace: tricky, userSkillsActive: "/u/active" });
+    const out = renderCodexConfig(tpl, { root: "/r", workspace: tricky, userSkillsActive: "/u/active" });
     const m = out.match(/\[projects\."((?:[^"\\]|\\.)*)"\]/);
     expect(m).not.toBeNull();
     expect(JSON.parse(`"${m![1]}"`)).toBe(tricky);
@@ -150,7 +153,7 @@ describe("path escaping", () => {
 
   it("round-trips a tricky workspace path through the real config template", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "oc-home-"));
-    const cfg = resolveConfig({ codexHome: home, backendUrl: "http://127.0.0.1:1", workspace: tricky });
+    const cfg = resolveConfig({ codexHome: home, workspace: tricky });
     const text = fs.readFileSync(ensureCodexHome(cfg).configPath, "utf8");
     const m = text.match(/\[projects\."((?:[^"\\]|\\.)*)"\]/);
     expect(m).not.toBeNull();
@@ -206,5 +209,61 @@ describe("version", () => {
   it("says unknown rather than throwing when the file is not there", async () => {
     const { readVersion } = await import("../src/version.js");
     expect(readVersion(fs.mkdtempSync(path.join(os.tmpdir(), "oc-noversion-")))).toBe("unknown");
+  });
+});
+
+describe("the ChatGPT sign-in", () => {
+  const dirs = () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "oc-login-"));
+    const home = path.join(root, "home");
+    fs.mkdirSync(home);
+    return { home, source: path.join(root, "personal", "auth.json"), target: path.join(home, "auth.json") };
+  };
+  const write = (file: string, text: string, ageSeconds = 0) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+    const at = Date.now() / 1000 - ageSeconds;
+    fs.utimesSync(file, at, at);
+  };
+
+  it("links the person's sign-in into the isolated home", () => {
+    const { home, source, target } = dirs();
+    write(source, "login");
+    linkCodexLogin(home, source);
+    expect(fs.lstatSync(target).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(target, "utf8")).toBe("login");
+    linkCodexLogin(home, source);
+    expect(fs.readFileSync(target, "utf8")).toBe("login");
+  });
+  it("carries a token Codex refreshed in the isolated home back to the sign-in", () => {
+    const { home, source, target } = dirs();
+    write(source, "old", 60);
+    write(target, "refreshed");
+    linkCodexLogin(home, source);
+    expect(fs.readFileSync(source, "utf8")).toBe("refreshed");
+    expect(fs.lstatSync(target).isSymbolicLink()).toBe(true);
+  });
+  it("does not overwrite a newer sign-in with a stale file", () => {
+    const { home, source, target } = dirs();
+    write(source, "new");
+    write(target, "stale", 60);
+    linkCodexLogin(home, source);
+    expect(fs.readFileSync(source, "utf8")).toBe("new");
+    expect(fs.readFileSync(target, "utf8")).toBe("new");
+  });
+  it("leaves nothing behind when nobody has signed in", () => {
+    const { home, source, target } = dirs();
+    linkCodexLogin(home, source);
+    expect(fs.existsSync(target)).toBe(false);
+  });
+  it("an own key renders its provider and never links the sign-in", () => {
+    const { home, source, target } = dirs();
+    write(source, "login");
+    const cfg = resolveConfig({ codexHome: home, workspace: "/tmp/ws", openaiApiKey: "sk", codexAuthFile: source });
+    const text = fs.readFileSync(ensureCodexHome(cfg).configPath, "utf8");
+    expect(text).toContain('model_provider = "openclicky"');
+    expect(text).toContain('env_key = "OPENCLICKY_OPENAI_KEY"');
+    expect(renderProviderBlock({ ownOpenAIKey: true })).toContain("https://api.openai.com/v1");
+    expect(fs.existsSync(target)).toBe(false);
   });
 });

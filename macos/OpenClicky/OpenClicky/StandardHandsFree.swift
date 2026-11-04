@@ -6,7 +6,7 @@
 //  on this Mac (loudness against the room's own noise, half a second kept from before the speech
 //  so the first word is whole), transcribed by the ask lane's engine, and asked exactly as if
 //  ⌃⌥ had been held for it. Slower than fast voice (the answer comes after the person stops, not
-//  while they finish), but it works on any key, a plan, or a free account.
+//  while they finish), but it works on any key or a plan.
 //
 //  One side at a time: while Clicky thinks or speaks the microphone is not listened to, so it
 //  never answers its own voice. Esc and the shortcut still stop it.
@@ -262,14 +262,14 @@ nonisolated final class StandardHandsFreeListener: @unchecked Sendable {
         }
     }
 
-    /// A heard turn through the ask lane's own engine (Apple's on a free account, else the one set
-    /// up), as the ⌃⌥ lane would hear it; "" when nothing was heard or the engine failed (logged).
+    /// A heard turn through the ask lane's own engine (Apple's without an own OpenAI key, else the one
+    /// set up), as the ⌃⌥ lane would hear it; "" when nothing was heard or the engine failed (logged).
     @MainActor static func transcribe(_ samples: [Float]) async -> String {
         let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("openclicky-handsfree-\(UUID().uuidString).wav")
         defer { try? FileManager.default.removeItem(at: fileURL) }
         do {
             try UtteranceDetector.wavData(samples).write(to: fileURL)
-            let provider: any BuddyTranscriptionProvider = AccountCapabilities.current().hearsOnDevice
+            let provider: any BuddyTranscriptionProvider = ProviderCapabilities.current().hearsOnDevice
                 ? AppleSpeechTranscriptionProvider()
                 : BuddyTranscriptionProviderFactory.makeDefaultProvider()
             let text = try await TakeAudioStore.transcribe(fileURL: fileURL, provider: provider, keyterms: [])

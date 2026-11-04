@@ -73,30 +73,20 @@ struct HearingSettingsTests {
 
     // MARK: language
 
-    /// F-16: the styles page's language, not the HUD's, reaches the backend engines; auto sends none.
+    /// F-16: the styles page's language, not the HUD's, reaches the network engines; auto sends none.
     @Test @MainActor func everyDictationEngineReceivesTheStylesPageLanguage() throws {
         let settings = DictationSettings(defaults: ScratchDefaults.make())
         settings.languageCode = "hi-IN"
 
-        let openClicky = try #require(DictationEngineResolver.makeProvider(for: .openclicky, settings: settings) as? OpenAIAudioTranscriptionProvider)
-        let assemblyAI = try #require(DictationEngineResolver.makeProvider(for: .assemblyai, settings: settings) as? AssemblyAIStreamingTranscriptionProvider)
+        let openClicky = try #require(DictationEngineResolver.makeProvider(for: .openAI, settings: settings) as? OpenAIAudioTranscriptionProvider)
         #expect(openClicky.language() == "hi")
-        #expect(assemblyAI.language() == "hi")
 
         settings.languageCode = "auto"
         #expect(openClicky.language() == nil)
-        #expect(assemblyAI.language() == nil)
     }
 
     /// The ⌃⌥ lane builds the provider without a dictation language and keeps the HUD's.
     @Test @MainActor func theAskLaneKeepsTheReplyLanguage() {
         #expect(OpenAIAudioTranscriptionProvider().language() == ReplyLanguage.currentCode)
-    }
-
-    /// AssemblyAI's streaming model hears Hindi and Marathi but not Tamil; the missing ones are logged.
-    @Test func assemblyAIKnowsWhichLanguagesItHears() {
-        #expect(AssemblyAIStreamingTranscriptionProvider.hears(languageCode: "hi"))
-        #expect(AssemblyAIStreamingTranscriptionProvider.hears(languageCode: nil))
-        #expect(!AssemblyAIStreamingTranscriptionProvider.hears(languageCode: "ta"))
     }
 }

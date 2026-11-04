@@ -14,18 +14,13 @@ public sealed class OpenClickyShellSettings
     /// <summary>Command used to run the CLI, e.g. ["openclicky"] or ["node", "C:\\path\\agent\\dist\\cli.js"].</summary>
     [JsonPropertyName("cliCommand")] public List<string> CliCommand { get; set; } = ["openclicky"];
 
-    /// <summary>The hosted backend by default; a self-hosted backend is one line (`http://localhost:8787`).</summary>
-    [JsonPropertyName("backendUrl")] public string BackendUrl { get; set; } = OpenClickyConfiguration.HostedBackendUrl;
-
-    [JsonPropertyName("token")] public string Token { get; set; } = "";
-
     /// <summary>Working directory for agent runs (created on demand).</summary>
     [JsonPropertyName("workspace")] public string Workspace { get; set; } = OpenClickyPaths.DefaultWorkspace;
 
     [JsonPropertyName("model")] public string Model { get; set; } = "";
     [JsonPropertyName("voiceSeconds")] public int VoiceSeconds { get; set; } = 5;
 
-    /// <summary>"openai" (via the backend, default), "assemblyai", or "apple" (the offline engine).</summary>
+    /// <summary>"openai" (on an own key, default), or "apple" (the offline engine).</summary>
     [JsonPropertyName("transcriptionProvider")] public string? TranscriptionProvider { get; set; }
 
     /// <summary>The language OpenClicky speaks and transcribes ("en", "hi"). Unset is English.</summary>
@@ -52,7 +47,7 @@ public sealed class OpenClickyShellSettings
     [JsonPropertyName("openaiApiKey")] public string? OpenaiApiKey { get; set; }
     [JsonPropertyName("anthropicApiKey")] public string? AnthropicApiKey { get; set; }
 
-    /// <summary>Your Sarvam key: Saaras transcribes, a Sarvam model polishes. Never sent to the backend.</summary>
+    /// <summary>Your Sarvam key: Saaras transcribes, a Sarvam model polishes.</summary>
     [JsonPropertyName("sarvamKey")] public string? SarvamKey { get; set; }
 
     /// <summary>More keys that can answer questions, each straight to its vendor.</summary>
@@ -65,6 +60,8 @@ public sealed class OpenClickyShellSettings
     /// <summary>Answer through a plan the person already pays for (Claude Code / Codex). Off until switched on.</summary>
     [JsonPropertyName("useClaudeCodePlan")] public bool? UseClaudeCodePlan { get; set; }
     [JsonPropertyName("useCodexPlan")] public bool? UseCodexPlan { get; set; }
+    /// <summary>The plan that takes over when the default runs out: null is the other linked plan, "none" none.</summary>
+    [JsonPropertyName("backupAnswerSource")] public string? BackupAnswerSource { get; set; }
 
     /// <summary>Who answers questions: null or "auto" picks in ProviderRouter's order; else an AnswerSource raw value.</summary>
     [JsonPropertyName("answerSource")] public string? AnswerSource { get; set; }
@@ -84,7 +81,7 @@ public sealed class OpenClickyShellSettings
     [JsonPropertyName("googleCloudApiKey")] public string? GoogleCloudApiKey { get; set; }
     [JsonPropertyName("amazonPollyCredentials")] public string? AmazonPollyCredentials { get; set; }
 
-    /// <summary>"play …": own Spotify client credentials ("clientId:clientSecret") for the song lookup; null → the backend's.</summary>
+    /// <summary>"play …": own Spotify client credentials ("clientId:clientSecret") for the song lookup; null → Spotify's search page</summary>
     [JsonPropertyName("spotifyCredentials")] public string? SpotifyCredentials { get; set; }
 
     /// <summary>Which inbox "check my email" and "draft an email" use ("gmail", "outlook"); null → automatic (Gmail).</summary>
@@ -95,11 +92,6 @@ public sealed class OpenClickyShellSettings
 
     /// <summary>The system voice picked in Settings (the Mac's key name, kept so the file is shared).</summary>
     [JsonPropertyName("macVoiceIdentifier")] public string? MacVoiceIdentifier { get; set; }
-
-    /// <summary>Written by sign-in: the refresh token, when the token expires (unix seconds), whose account.</summary>
-    [JsonPropertyName("refreshToken")] public string? RefreshToken { get; set; }
-    [JsonPropertyName("tokenExpiresAt")] public double? TokenExpiresAt { get; set; }
-    [JsonPropertyName("accountEmail")] public string? AccountEmail { get; set; }
 
     /// <summary>A deep copy (Swift's struct value semantics).</summary>
     public OpenClickyShellSettings Clone()
@@ -127,8 +119,6 @@ public sealed class OpenClickyShellSettings
         // An explicit null takes the default too (Swift's decodeIfPresent).
         var defaults = new OpenClickyShellSettings();
         decoded.CliCommand ??= defaults.CliCommand;
-        decoded.BackendUrl ??= defaults.BackendUrl;
-        decoded.Token ??= defaults.Token;
         decoded.Workspace ??= defaults.Workspace;
         decoded.Model ??= defaults.Model;
         return decoded;

@@ -282,9 +282,6 @@ public static class UiDemo
             islandModel.TourCard = FirstRunTourCards.Make(FirstRunTourStep.Talk, inputs with { Status = "✓ that’s asking clicky. it can point at things too.", StatusIsGood = true });
             await Wait(1.0);
             Shot("island-tour-talk", IslandRegion(190));
-            islandModel.TourCard = FirstRunTourCards.Make(FirstRunTourStep.Account, inputs with { AccountCardAsksForEmail = true });
-            await Wait(0.9);
-            Shot("island-tour-account", IslandRegion(200));
             islandModel.TourCard = null;
             await Wait(2.2);
 

@@ -20,9 +20,9 @@ struct OpenClickyConfigurationTests {
         var anthropicOnly = OpenClickyShellSettings()
         anthropicOnly.anthropicApiKey = "ak-user"
         #expect(OpenClickyConfiguration.isConfigured(anthropicOnly))
-        var signedIn = OpenClickyShellSettings()
-        signedIn.token = "tok"
-        #expect(OpenClickyConfiguration.isConfigured(signedIn))
+        var plan = OpenClickyShellSettings()
+        plan.useCodexPlan = true
+        #expect(OpenClickyConfiguration.isConfigured(plan))
         #expect(!OpenClickyConfiguration.usesOwnKeys(OpenClickyShellSettings()))
         #expect(!OpenClickyConfiguration.isConfigured(OpenClickyShellSettings()))
     }
@@ -30,10 +30,10 @@ struct OpenClickyConfigurationTests {
     @Test func cliEnvironmentCarriesTheUserKeysUnderOpenClickyNames() {
         var settings = OpenClickyShellSettings()
         settings.openaiApiKey = "sk-user"
-        settings.token = "tok"
         let environment = OpenClickyConfiguration.cliProcessEnvironment(from: settings)
         #expect(environment["OPENCLICKY_OPENAI_KEY"] == "sk-user")
-        #expect(environment["OPENCLICKY_TOKEN"] == "tok")
+        #expect(environment["OPENCLICKY_TOKEN"] == nil)
+        #expect(environment["BACKEND_URL"] == nil)
         #expect(environment["OPENAI_API_KEY"] == nil)
         #expect(environment["OPENCLICKY_ANTHROPIC_KEY"] == nil)
     }
@@ -146,11 +146,11 @@ struct OpenClickyConfigurationTests {
     /// One wrong-typed field used to make `update` start from the defaults and write them back,
     /// losing every key the person had stored. A file that does not read must be left alone.
     @Test func anUpdateNeverRewritesAFileThatDoesNotDecode() throws {
-        let original = #"{"token":"old","sarvamKey":"sk-sarvam","openaiApiKey":"sk-openai","voiceSeconds":"5"}"#
+        let original = #"{"model":"old","sarvamKey":"sk-sarvam","openaiApiKey":"sk-openai","voiceSeconds":"5"}"#
         let fileURL = try temporarySettingsFile(original)
         defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
 
-        let written = OpenClickyConfiguration.update(fileAt: fileURL) { $0.token = "new" }
+        let written = OpenClickyConfiguration.update(fileAt: fileURL) { $0.model = "new" }
 
         #expect(!written)
         #expect(try String(contentsOf: fileURL, encoding: .utf8) == original)
@@ -160,61 +160,74 @@ struct OpenClickyConfigurationTests {
     }
 
     @Test func anUpdateNeverRewritesAFileThatIsNotJSON() throws {
-        let original = "{ token: oops"
+        let original = "{ model: oops"
         let fileURL = try temporarySettingsFile(original)
         defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
 
-        #expect(!OpenClickyConfiguration.update(fileAt: fileURL) { $0.token = "new" })
+        #expect(!OpenClickyConfiguration.update(fileAt: fileURL) { $0.model = "new" })
         #expect(try String(contentsOf: fileURL, encoding: .utf8) == original)
     }
 
     /// The change is merged into the file as it is: fields this build does not know (a newer
     /// build's, or the person's own notes) and everything not changed stay exactly as written.
     @Test func anUpdateKeepsFieldsItDoesNotKnow() throws {
-        let fileURL = try temporarySettingsFile(#"{"token":"old","sarvamKey":"sk-sarvam","futureSetting":{"depth":2},"refreshToken":"r1"}"#)
+        let fileURL = try temporarySettingsFile(#"{"model":"old","sarvamKey":"sk-sarvam","futureSetting":{"depth":2},"language":"hi"}"#)
         defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
 
         let written = OpenClickyConfiguration.update(fileAt: fileURL) { settings in
-            settings.token = "new"
-            settings.refreshToken = nil
+            settings.model = "new"
+            settings.language = nil
         }
 
         #expect(written)
         let object = try jsonObject(at: fileURL)
-        #expect(object["token"] as? String == "new")
+        #expect(object["model"] as? String == "new")
         #expect(object["sarvamKey"] as? String == "sk-sarvam")
         #expect((object["futureSetting"] as? [String: Any])?["depth"] as? Int == 2)
-        #expect(object["refreshToken"] == nil)
+        #expect(object["language"] == nil)
         // Defaults the file never spelled out are not written into it.
         #expect(object["voiceSeconds"] == nil)
     }
 
     /// A short, hand-written shell.json is a normal file: the missing fields take their defaults.
     @Test func aFileWithOnlySomeFieldsReads() throws {
-        let fileURL = try temporarySettingsFile(#"{"token":"tok","sarvamKey":"sk-sarvam"}"#)
+        let fileURL = try temporarySettingsFile(#"{"model":"m","sarvamKey":"sk-sarvam"}"#)
         defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
 
         let settings = OpenClickyConfiguration.load(fileURL: fileURL, environment: [:])
-        #expect(settings.token == "tok")
+        #expect(settings.model == "m")
         #expect(settings.sarvamKey == "sk-sarvam")
         #expect(settings.voiceSeconds == 5)
-        #expect(settings.backendUrl == OpenClickyConfiguration.hostedBackendURL)
     }
 
-    /// `BACKEND_URL=… open OpenClicky.app` is for this launch only: a sign-in or refresh must not
-    /// write the override into shell.json.
+    /// `OPENCLICKY_MODEL=… open OpenClicky.app` is for this launch only: a save must not write the
+    /// override into shell.json.
     @Test func environmentOverridesAreNeverWrittenToTheFile() throws {
-        let fileURL = try temporarySettingsFile(#"{"token":"old","backendUrl":"https://api.example.com"}"#)
+        let fileURL = try temporarySettingsFile(#"{"workspace":"/tmp/w"}"#)
         defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
-        let environment = ["BACKEND_URL": "http://localhost:8787", "OPENCLICKY_MODEL": "local-model"]
+        let environment = ["OPENCLICKY_MODEL": "local-model"]
 
-        #expect(OpenClickyConfiguration.load(fileURL: fileURL, environment: environment).backendUrl == "http://localhost:8787")
-        #expect(OpenClickyConfiguration.update(fileAt: fileURL) { $0.token = "new" })
+        #expect(OpenClickyConfiguration.load(fileURL: fileURL, environment: environment).model == "local-model")
+        #expect(OpenClickyConfiguration.update(fileAt: fileURL) { $0.language = "hi" })
 
         let object = try jsonObject(at: fileURL)
-        #expect(object["backendUrl"] as? String == "https://api.example.com")
         #expect(object["model"] == nil)
-        #expect(object["token"] as? String == "new")
+        #expect(object["language"] as? String == "hi")
+    }
+
+    /// A file from when the app had accounts still reads, and the next save drops those fields.
+    @Test func oldAccountFieldsReadAndAreDroppedOnSave() throws {
+        let fileURL = try temporarySettingsFile(#"{"backendUrl":"https://old.example","token":"tok","refreshToken":"r","tokenExpiresAt":1,"accountEmail":"a@b.c","sarvamKey":"sk"}"#)
+        defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+
+        #expect(OpenClickyConfiguration.load(fileURL: fileURL, environment: [:]).sarvamKey == "sk")
+        #expect(OpenClickyConfiguration.update(fileAt: fileURL) { $0.language = "hi" })
+
+        let object = try jsonObject(at: fileURL)
+        for dropped in ["backendUrl", "token", "refreshToken", "tokenExpiresAt", "accountEmail"] {
+            #expect(object[dropped] == nil)
+        }
+        #expect(object["sarvamKey"] as? String == "sk")
     }
 
     @Test func anUpdateCreatesAMissingFile() throws {
@@ -223,7 +236,7 @@ struct OpenClickyConfigurationTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let fileURL = directory.appendingPathComponent("shell.json")
 
-        #expect(OpenClickyConfiguration.update(fileAt: fileURL) { $0.token = "tok" })
-        #expect(OpenClickyConfiguration.load(fileURL: fileURL, environment: [:]).token == "tok")
+        #expect(OpenClickyConfiguration.update(fileAt: fileURL) { $0.model = "tok" })
+        #expect(OpenClickyConfiguration.load(fileURL: fileURL, environment: [:]).model == "tok")
     }
 }

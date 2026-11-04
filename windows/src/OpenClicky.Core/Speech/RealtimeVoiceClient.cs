@@ -1,8 +1,8 @@
 // Ports RealtimeVoiceClient.swift: the fast voice lane — speech in, speech out over one OpenAI
 // Realtime (or Gemini Live) WebSocket, no transcribe → think → synthesize chain.
 //
-// - The client secret comes from ProviderRouter: the person's own OpenAI key mints it at OpenAI,
-//   else the backend mints it (POST /agent/realtime/session); the real key never reaches OpenAI's socket.
+// - The client secret comes from ProviderRouter: the person's own OpenAI key mints it at OpenAI;
+//   the real key never reaches OpenAI's socket.
 // - A Gemini key (alone, or picked in Settings) runs the same turns on Gemini Live instead: the
 //   client still speaks OpenAI's events, and GeminiLiveDialect translates them both ways.
 // - The microphone is a communications capture (echo cancellation where Windows has it), so it can
@@ -82,7 +82,7 @@ public enum RealtimeVoiceErrorKind
 {
     NotConfigured,
     NotConnected,
-    Backend,
+    Refused,
     Audio,
     InvalidUrl,
 }
@@ -100,9 +100,9 @@ public sealed class RealtimeVoiceException : Exception
 
     private static string Describe(RealtimeVoiceErrorKind kind, string detail) => kind switch
     {
-        RealtimeVoiceErrorKind.NotConfigured => "OpenClicky backend token is not configured.",
+        RealtimeVoiceErrorKind.NotConfigured => "Nothing is set up for fast voice: add an OpenAI or Gemini key.",
         RealtimeVoiceErrorKind.NotConnected => "Realtime session is not connected.",
-        RealtimeVoiceErrorKind.Backend => $"Realtime session could not be created: {detail}",
+        RealtimeVoiceErrorKind.Refused => $"Realtime session could not be created: {detail}",
         RealtimeVoiceErrorKind.Audio => $"Audio setup failed: {detail}",
         _ => detail,
     };
@@ -180,7 +180,7 @@ public sealed partial class RealtimeVoiceClient : ObservableObject, IDisposable
     /// <summary>What a refused socket handshake means, in words a person can act on.</summary>
     public static string HandshakeFailureDescription(int? statusCode, string underlyingError, string provider = "OpenAI") => statusCode switch
     {
-        401 => $"{provider} refused the realtime session (401): the session key was rejected. Check your sign-in, or your own {provider} key in Settings → Account.",
+        401 => $"{provider} refused the realtime session (401): the session key was rejected. Check your own {provider} key in Settings → Keys & Plans.",
         403 => $"{provider} refused the realtime session (403): this key has no access to the realtime model.",
         429 => $"{provider} refused the realtime session (429): this key is over its rate limit or out of credit.",
         { } status when status >= 400 => $"{provider} refused the realtime session ({status}).",
@@ -191,8 +191,8 @@ public sealed partial class RealtimeVoiceClient : ObservableObject, IDisposable
     public static string CloseDescription(string provider, int? status, string? reason) =>
         $"{provider} closed the connection ({status}){(string.IsNullOrWhiteSpace(reason) ? "" : $": {reason.Trim()}")}";
 
-    /// <summary>The backend's own error text where it gave one, with the status, so a rejected key reads as a rejected key rather than as JSON.</summary>
-    public static string BackendRefusalDescription(int statusCode, byte[] body)
+    /// <summary>The vendor's own error text where it gave one, with the status, so a rejected key reads as a rejected key rather than as JSON.</summary>
+    public static string SecretRefusalDescription(int statusCode, byte[] body)
     {
         string? stated = null;
         try
@@ -207,9 +207,9 @@ public sealed partial class RealtimeVoiceClient : ObservableObject, IDisposable
         var detail = string.IsNullOrEmpty(stated) ? "no client secret" : stated;
         return statusCode switch
         {
-            401 or 403 => $"the backend refused ({statusCode}): {detail}. Check your sign-in, or your own OpenAI key in %USERPROFILE%\\.openclicky\\shell.json.",
+            401 or 403 => $"openai refused ({statusCode}): {detail}. Check your own OpenAI key in %USERPROFILE%\\.openclicky\\shell.json.",
             0 => detail,
-            _ => $"the backend answered {statusCode}: {detail}",
+            _ => $"openai answered {statusCode}: {detail}",
         };
     }
 
@@ -596,7 +596,7 @@ public sealed partial class RealtimeVoiceClient : ObservableObject, IDisposable
         {
             case ProviderRouteKind.OpenAIDirect:
             {
-                // The person's own OpenAI key mints the client secret at OpenAI itself; the answer has the backend's shape.
+                // The person's own OpenAI key mints the client secret at OpenAI itself.
                 var openAIKey = ProviderRouter.CurrentCredentials().OpenAIKey ?? throw new RealtimeVoiceException(RealtimeVoiceErrorKind.NotConfigured);
                 var secretRequest = DirectProviderRequests.OpenAIRealtimeSecret(openAIKey, connectInstructions, voice);
                 secretResponse = await HttpClients.Shared.SendAsync(secretRequest);
@@ -605,17 +605,7 @@ public sealed partial class RealtimeVoiceClient : ObservableObject, IDisposable
             case ProviderRouteKind.Unavailable:
                 throw new ProviderRouteUnavailableException(ProviderCapability.Realtime, route.Sentence ?? ProviderRouter.NeedsOpenAIKeySentence);
             default:
-            {
-                var secretUrl = $"{OpenClickyConfiguration.BackendBaseUrl}/agent/realtime/session";
-                if (!Uri.TryCreate(secretUrl, UriKind.Absolute, out var secretUri))
-                    throw new RealtimeVoiceException(RealtimeVoiceErrorKind.InvalidUrl, $"OpenClicky backend URL is invalid: {OpenClickyConfiguration.BackendBaseUrl}");
-                var body = new JsonObject { ["instructions"] = connectInstructions };
-                if (voice is not null) body["voice"] = voice;
-                var secretRequest = new HttpRequestMessage(HttpMethod.Post, secretUri) { Content = DirectProviderRequests.JsonContent(body) };
-                OpenClickyConfiguration.Authorize(secretRequest);
-                secretResponse = await BackendSignIn.SendAsync(secretRequest);
-                break;
-            }
+                throw new RealtimeVoiceException(RealtimeVoiceErrorKind.NotConfigured);
         }
         string clientSecret;
         string model;
@@ -624,7 +614,7 @@ public sealed partial class RealtimeVoiceClient : ObservableObject, IDisposable
             var secretData = await secretResponse.Content.ReadAsByteArrayAsync();
             var secretStatusCode = (int)secretResponse.StatusCode;
             var parsed = secretStatusCode is >= 200 and <= 299 ? ParseClientSecret(secretData) : null;
-            if (parsed is null) throw new RealtimeVoiceException(RealtimeVoiceErrorKind.Backend, BackendRefusalDescription(secretStatusCode, secretData));
+            if (parsed is null) throw new RealtimeVoiceException(RealtimeVoiceErrorKind.Refused, SecretRefusalDescription(secretStatusCode, secretData));
             (clientSecret, model) = parsed.Value;
         }
         var socketUrl = RealtimeSocketUrl(model);
@@ -744,7 +734,7 @@ public sealed partial class RealtimeVoiceClient : ObservableObject, IDisposable
         if (handshakeFailureBeforeWaiting is { } refusal)
         {
             handshakeFailureBeforeWaiting = null;
-            throw new RealtimeVoiceException(RealtimeVoiceErrorKind.Backend, refusal);
+            throw new RealtimeVoiceException(RealtimeVoiceErrorKind.Refused, refusal);
         }
         // The first event may already be in (it arrived during the audio warm-up).
         if (isSocketOpen && webSocket == socket) return;
@@ -753,7 +743,7 @@ public sealed partial class RealtimeVoiceClient : ObservableObject, IDisposable
         _ = Task.Delay(TimeSpan.FromSeconds(10)).ContinueWith(_ => mainThread.Post(() =>
         {
             if (handshakeSource != source) return;
-            FailPendingHandshake(new RealtimeVoiceException(RealtimeVoiceErrorKind.Backend, $"{ProviderName} did not answer the realtime connection within 10 seconds."));
+            FailPendingHandshake(new RealtimeVoiceException(RealtimeVoiceErrorKind.Refused, $"{ProviderName} did not answer the realtime connection within 10 seconds."));
         }), TaskScheduler.Default);
         await source.Task;
     }
@@ -806,7 +796,7 @@ public sealed partial class RealtimeVoiceClient : ObservableObject, IDisposable
         var reason = HandshakeFailureDescription(statusCode, underlyingError, ProviderName);
         if (handshakeSource is not null)
         {
-            FailPendingHandshake(new RealtimeVoiceException(RealtimeVoiceErrorKind.Backend, reason));
+            FailPendingHandshake(new RealtimeVoiceException(RealtimeVoiceErrorKind.Refused, reason));
             return;
         }
         if (!IsConnected)

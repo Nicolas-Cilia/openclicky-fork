@@ -178,7 +178,7 @@ public sealed partial class CompanionManager
     {
         if (!UsesRealtimeVoice && !OpenClickyConfiguration.IsConfigured)
         {
-            // Nothing could answer: no key, no plan and no account.
+            // Nothing could answer: no key and no plan.
             Overlay.StreamCursorCaption(ProviderRouter.NeedsAnthropicKeySentence, holdSeconds: 6);
             return;
         }

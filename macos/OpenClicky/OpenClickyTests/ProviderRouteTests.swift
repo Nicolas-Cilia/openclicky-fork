@@ -3,7 +3,7 @@
 //  OpenClickyTests
 //
 //  Own keys are the primary route (issue #4): every capability × own key / account / neither, the
-//  direct requests (shaped like the backend's own-key path), and the 401 rules for a Mac with no
+//  direct requests (their request shapes), and the 401 rules for a Mac with no
 //  account. Nothing here reads shell.json or any file.
 //
 
@@ -12,12 +12,10 @@ import Testing
 @testable import OpenClicky
 
 struct ProviderRouteTests {
-    private let openAIOnly = ProviderCredentials(openAIKey: "sk-user", anthropicKey: nil, accountToken: nil)
-    private let anthropicOnly = ProviderCredentials(openAIKey: nil, anthropicKey: "ak-user", accountToken: nil)
-    private let bothKeys = ProviderCredentials(openAIKey: "sk-user", anthropicKey: "ak-user", accountToken: nil)
-    private let accountOnly = ProviderCredentials(openAIKey: nil, anthropicKey: nil, accountToken: "tok")
-    private let openAIAndAccount = ProviderCredentials(openAIKey: "sk-user", anthropicKey: nil, accountToken: "tok")
-    private let nothing = ProviderCredentials(openAIKey: " ", anthropicKey: "", accountToken: "\n")
+    private let openAIOnly = ProviderCredentials(openAIKey: "sk-user", anthropicKey: nil)
+    private let anthropicOnly = ProviderCredentials(openAIKey: nil, anthropicKey: "ak-user")
+    private let bothKeys = ProviderCredentials(openAIKey: "sk-user", anthropicKey: "ak-user")
+    private let nothing = ProviderCredentials(openAIKey: " ", anthropicKey: "")
 
     private let openAICapabilities: [ProviderCapability] = [.openAIChat, .speech, .transcription, .realtime]
 
@@ -26,7 +24,6 @@ struct ProviderRouteTests {
     @Test func anOwnOpenAIKeyGoesStraightToOpenAI() {
         for capability in openAICapabilities {
             #expect(ProviderRouter.route(for: capability, credentials: openAIOnly) == .openAIDirect)
-            #expect(ProviderRouter.route(for: capability, credentials: openAIAndAccount) == .openAIDirect)
         }
     }
 
@@ -35,13 +32,12 @@ struct ProviderRouteTests {
         #expect(ProviderRouter.route(for: .claude, credentials: bothKeys) == .anthropicDirect)
     }
 
-    @Test func anAccountCoversWhatNoOwnKeyDoes() {
-        for capability in ProviderCapability.allCases {
-            #expect(ProviderRouter.route(for: capability, credentials: accountOnly) == .backend)
+    @Test func aPlanOnlyAnswersQuestions() {
+        let plan = ProviderCredentials(openAIKey: nil, anthropicKey: nil, codexPlanOn: true)
+        #expect(ProviderRouter.route(for: .claude, credentials: plan) == .answerProvider(.codexPlan))
+        for capability in openAICapabilities {
+            #expect(ProviderRouter.route(for: capability, credentials: plan) == .unavailable(ProviderRouter.needsOpenAIKeySentence))
         }
-        // Signed in with an OpenAI key too: questions run on the key (it can answer now), not the credits.
-        #expect(ProviderRouter.route(for: .claude, credentials: openAIAndAccount) == .answerProvider(.openAI))
-        #expect(ProviderRouter.route(for: .assemblyAIStreaming, credentials: openAIAndAccount) == .backend)
     }
 
     @Test func withNeitherTheRouteSaysWhichKeyWouldDo() {
@@ -52,35 +48,29 @@ struct ProviderRouteTests {
         #expect(ProviderRouter.route(for: .claude, credentials: nothing) == .unavailable(ProviderRouter.needsAnthropicKeySentence))
         // An OpenAI key answers questions itself now (AnswerProvider), no Anthropic key needed.
         #expect(ProviderRouter.route(for: .claude, credentials: openAIOnly) == .answerProvider(.openAI))
-        // AssemblyAI is minted on OpenClicky's key: an own key never covers it.
-        #expect(ProviderRouter.route(for: .assemblyAIStreaming, credentials: bothKeys) == .unavailable(ProviderRouter.assemblyAINeedsAccountSentence))
     }
 
     /// Automatic order: own keys (Anthropic, then OpenRouter, OpenAI, Gemini, xAI, Mistral, Groq),
-    /// then the plans switched on, then OpenClicky's credits.
+    /// then the plans switched on.
     @Test func automaticAnswersWithTheFirstSourceThatCan() {
-        let account = "acct"
-        #expect(ProviderRouter.route(for: .claude, credentials: ProviderCredentials(openAIKey: nil, anthropicKey: nil, accountToken: account, geminiKey: "g")) == .answerProvider(.gemini))
-        #expect(ProviderRouter.route(for: .claude, credentials: ProviderCredentials(openAIKey: "o", anthropicKey: nil, accountToken: nil, openRouterKey: "r")) == .answerProvider(.openRouter))
-        #expect(ProviderRouter.route(for: .claude, credentials: ProviderCredentials(openAIKey: nil, anthropicKey: "a", accountToken: nil, openRouterKey: "r")) == .anthropicDirect)
-        #expect(ProviderRouter.route(for: .claude, credentials: ProviderCredentials(openAIKey: nil, anthropicKey: nil, accountToken: account, codexPlanOn: true)) == .answerProvider(.codexPlan))
-        #expect(ProviderRouter.route(for: .claude, credentials: ProviderCredentials(openAIKey: nil, anthropicKey: nil, accountToken: nil, claudeCodePlanOn: true, codexPlanOn: true)) == .answerProvider(.claudeCodePlan))
-        #expect(ProviderRouter.route(for: .claude, credentials: ProviderCredentials(openAIKey: nil, anthropicKey: nil, accountToken: account)) == .backend)
+        #expect(ProviderRouter.route(for: .claude, credentials: ProviderCredentials(openAIKey: nil, anthropicKey: nil, geminiKey: "g")) == .answerProvider(.gemini))
+        #expect(ProviderRouter.route(for: .claude, credentials: ProviderCredentials(openAIKey: "o", anthropicKey: nil, openRouterKey: "r")) == .answerProvider(.openRouter))
+        #expect(ProviderRouter.route(for: .claude, credentials: ProviderCredentials(openAIKey: nil, anthropicKey: "a", openRouterKey: "r")) == .anthropicDirect)
+        #expect(ProviderRouter.route(for: .claude, credentials: ProviderCredentials(openAIKey: nil, anthropicKey: nil, codexPlanOn: true)) == .answerProvider(.codexPlan))
+        #expect(ProviderRouter.route(for: .claude, credentials: ProviderCredentials(openAIKey: nil, anthropicKey: nil, claudeCodePlanOn: true, codexPlanOn: true)) == .answerProvider(.claudeCodePlan))
     }
 
     /// A source the person picked answers when it can; one that cannot falls back to automatic.
     @Test func aPickedSourceWinsWhenItCanAnswer() {
-        let pickedGroq = ProviderCredentials(openAIKey: nil, anthropicKey: "a", accountToken: nil, groqKey: "q", preferredAnswerSource: .groq)
+        let pickedGroq = ProviderCredentials(openAIKey: nil, anthropicKey: "a", groqKey: "q", preferredAnswerSource: .groq)
         #expect(ProviderRouter.route(for: .claude, credentials: pickedGroq) == .answerProvider(.groq))
-        let pickedCreditsSignedIn = ProviderCredentials(openAIKey: nil, anthropicKey: "a", accountToken: "acct", preferredAnswerSource: .openClickyAccount)
-        #expect(ProviderRouter.route(for: .claude, credentials: pickedCreditsSignedIn) == .backend)
-        let pickedMissing = ProviderCredentials(openAIKey: nil, anthropicKey: "a", accountToken: nil, preferredAnswerSource: .mistral)
+        let pickedMissing = ProviderCredentials(openAIKey: nil, anthropicKey: "a", preferredAnswerSource: .mistral)
         #expect(ProviderRouter.route(for: .claude, credentials: pickedMissing) == .anthropicDirect)
     }
 
-    /// Only questions move: speech, dictation clean-up and the rest still need OpenAI or the account.
+    /// Only questions move: speech, dictation clean-up and the rest still need OpenAI.
     @Test func otherKeysOnlyAnswerQuestions() {
-        let geminiOnly = ProviderCredentials(openAIKey: nil, anthropicKey: nil, accountToken: nil, geminiKey: "g")
+        let geminiOnly = ProviderCredentials(openAIKey: nil, anthropicKey: nil, geminiKey: "g")
         #expect(ProviderRouter.route(for: .speech, credentials: geminiOnly) == .unavailable(ProviderRouter.needsOpenAIKeySentence))
         #expect(ProviderRouter.route(for: .openAIChat, credentials: geminiOnly) == .unavailable(ProviderRouter.needsOpenAIKeySentence))
     }
@@ -89,7 +79,6 @@ struct ProviderRouteTests {
     @Test func eachAnsweringRouteNamesItsSource() {
         #expect(ProviderRoute.anthropicDirect.answeringSource?.shortName == "Claude")
         #expect(ProviderRoute.answerProvider(.claudeCodePlan).answeringSource?.shortName == "Claude Code")
-        #expect(ProviderRoute.backend.answeringSource?.shortName == "free credits")
         #expect(ProviderRoute.unavailable("no").answeringSource == nil)
         #expect(ProviderRoute.openAIDirect.answeringSource == nil)
     }
@@ -115,8 +104,8 @@ struct ProviderRouteTests {
     }
 
     @Test func blankValuesCountAsMissing() {
-        #expect(nothing.openAIKey == nil && nothing.anthropicKey == nil && nothing.accountToken == nil)
-        #expect(ProviderCredentials(openAIKey: " sk-user\n", anthropicKey: nil, accountToken: nil).openAIKey == "sk-user")
+        #expect(nothing.openAIKey == nil && nothing.anthropicKey == nil)
+        #expect(ProviderCredentials(openAIKey: " sk-user\n", anthropicKey: nil).openAIKey == "sk-user")
     }
 
     // MARK: the direct requests
@@ -133,7 +122,7 @@ struct ProviderRouteTests {
         #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
     }
 
-    @Test func speechIsOpenAISpeechAsTheBackendAsksForIt() throws {
+    @Test func speechIsOpenAISpeech() throws {
         let request = try DirectProviderRequests.openAISpeech(key: "sk-user", text: "hello")
         #expect(request.url?.absoluteString == "https://api.openai.com/v1/audio/speech")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer sk-user")
@@ -144,7 +133,7 @@ struct ProviderRouteTests {
         #expect(body["response_format"] as? String == "mp3")
     }
 
-    @Test func transcriptionIsTheMultipartUploadTheBackendBuilds() throws {
+    @Test func transcriptionIsAMultipartUpload() throws {
         let request = DirectProviderRequests.openAITranscription(key: "sk-user", wav: Data("RIFFdata".utf8), language: "en", prompt: "OpenClicky", boundary: "b")
         #expect(request.url?.absoluteString == "https://api.openai.com/v1/audio/transcriptions")
         #expect(request.value(forHTTPHeaderField: "Content-Type") == "multipart/form-data; boundary=b")
@@ -192,21 +181,5 @@ struct ProviderRouteTests {
             return (reply, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         })
         #expect(try await polisher.polish(system: "tidy", user: "hello") == "Hello.")
-    }
-
-    // MARK: a 401 on a Mac with no account
-
-    @Test func a401ForARequestWithNoTokenSignsNobodyOut() async throws {
-        var request = URLRequest(url: URL(string: "https://backend.test/v1/messages")!)
-        request.httpMethod = "POST"
-        let refusal = Data(#"{"error":"missing Authorization: Bearer <token>"}"#.utf8)
-        let handling = BackendSignIn.SignInRejectionHandling(
-            handleRejection: { _ in Issue.record("a request with no token has no sign-in to handle"); return .signedOut },
-            currentToken: { nil },
-            signOutExpired: { Issue.record("nobody may be signed out") })
-        let answer = try await BackendSignIn.send(request, using: { _ in
-            (refusal, HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!)
-        }, signIn: handling)
-        #expect((answer.1 as? HTTPURLResponse)?.statusCode == 401)
     }
 }

@@ -24,7 +24,7 @@ nonisolated enum AnswerSourceCheck {
     }
 
     /// Asks `source` alone, whatever the router would pick. Anthropic is checked by listing its
-    /// models (ClaudeAPI answers it, not an AnswerProvider); the free credits aren't checked here.
+    /// models (ClaudeAPI answers it, not an AnswerProvider).
     static func run(_ source: AnswerSource, credentials: ProviderCredentials,
                     modelOverrides: [String: String]) async -> Outcome {
         let started = Date()
@@ -40,8 +40,6 @@ nonisolated enum AnswerSourceCheck {
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 return status == 200 ? .works(seconds: Date().timeIntervalSince(started))
                     : .failed(status == 401 ? "Anthropic didn’t accept this key." : "Anthropic answered \(status).")
-            case .openClickyAccount:
-                return .failed("The free credits are checked by asking Clicky.")
             default:
                 let provider = try await AnswerProviderFactory.make(for: source, credentials: credentials, modelOverrides: modelOverrides)
                 let request = AnswerRequest(

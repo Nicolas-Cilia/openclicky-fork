@@ -84,28 +84,21 @@ const MIME: Record<string, string> = { ".wav": "audio/wav", ".mp3": "audio/mpeg"
 
 /**
  * Speech-to-text. With the person's own OpenAI key: the multipart upload the backend would have
- * built, straight to OpenAI. Otherwise `POST /agent/transcribe` on their token.
+ * built, straight to OpenAI.
  */
 export async function transcribe(cfg: AgentConfig, filePath: string, opts: { language?: string; fetchImpl?: typeof fetch } = {}): Promise<string> {
-  const route = openaiRoute(cfg, "/agent/transcribe", "/audio/transcriptions");
+  const route = openaiRoute(cfg, "/audio/transcriptions");
   if (!route) throw new Error(`transcription ${needsOpenAI}`);
   const f = opts.fetchImpl ?? fetch;
   const mime = MIME[path.extname(filePath).toLowerCase()] ?? "audio/wav";
   const audio = fs.readFileSync(filePath);
-  let body: BodyInit;
-  if (route.direct) {
-    const form = new FormData();
-    form.append("file", new Blob([audio], { type: mime }), `audio${path.extname(filePath) || ".wav"}`);
-    form.append("model", DIRECT_DEFAULTS.transcribeModel);
-    form.append("response_format", "json");
-    if (opts.language) form.append("language", opts.language);
-    body = form;
-  } else {
-    route.headers["content-type"] = "application/json";
-    body = JSON.stringify({ audio: audio.toString("base64"), mime, ...(opts.language ? { language: opts.language } : {}) });
-  }
-  const res = await f(route.url, { method: "POST", headers: route.headers, body });
-  if (!res.ok) throw new Error(`${route.direct ? "openai" : "backend"} ${res.status}: ${(await res.text()).slice(0, 500)}`);
+  const form = new FormData();
+  form.append("file", new Blob([audio], { type: mime }), `audio${path.extname(filePath) || ".wav"}`);
+  form.append("model", DIRECT_DEFAULTS.transcribeModel);
+  form.append("response_format", "json");
+  if (opts.language) form.append("language", opts.language);
+  const res = await f(route.url, { method: "POST", headers: route.headers, body: form });
+  if (!res.ok) throw new Error(`openai ${res.status}: ${(await res.text()).slice(0, 500)}`);
   const json = (await res.json()) as { text?: string };
   return (json.text ?? "").trim();
 }

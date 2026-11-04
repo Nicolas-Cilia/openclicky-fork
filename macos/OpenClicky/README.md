@@ -5,18 +5,16 @@ listens when you hold ctrl+option, talks back, points at things, and hands real 
 OpenClicky agent.
 
 This app started as a fork of the original open-source Clicky companion app (MIT; the copyright
-holder is named in `LICENSE`). Everything provider-facing now goes through the OpenClicky backend,
-and an **Agent mode** routes "do work" requests to a Codex thread. `OPENCLICKY.md` has the full
-rename map and the list of integration changes.
+holder is named in `LICENSE`). Answers run on a linked Claude or Codex plan or an own key,
+and an **Agent mode** routes "do work" requests to a Codex thread.
 
 ## Build and run
 
 ```bash
-open OpenClicky.xcodeproj    # set your signing team under Signing & Capabilities, then Run
+open OpenClicky.xcodeproj    # builds ad hoc signed; press Run
 ```
 
-Requirements: macOS 14.2+, Xcode 15+, the OpenClicky backend running, and `~/.openclicky/shell.json`
-with your backend URL, token, and CLI command (see the repository README, "Run the macOS app").
+Requirements: macOS 14.2+ and Xcode 15+. See `docs/setup.md` for the agent tool and releases.
 
 Permissions the app asks for on first run: Microphone, Screen Recording, Accessibility (for the
 global push-to-talk shortcut), and Speech Recognition (only for the Apple transcription provider).

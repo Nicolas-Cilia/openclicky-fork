@@ -32,7 +32,7 @@ struct FormattedTake: Equatable {
 
 /// A model that can rewrite a take. `DictationEngineResolver.makePolisher` picks one: Apple's
 /// on-device model (`AppleModelTakePolisher`), else Sarvam, OpenAI, Anthropic or another answer key
-/// of the person's own, else the OpenClicky backend on an account (all but Apple's in `TakePolishers.swift`).
+/// of the person's own (all but Apple's in `TakePolishers.swift`).
 protocol TakePolisher: Sendable {
     var displayName: String { get }
     func polish(system: String, user: String) async throws -> String

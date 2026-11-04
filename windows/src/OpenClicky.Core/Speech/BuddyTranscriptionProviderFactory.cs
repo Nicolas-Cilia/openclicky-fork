@@ -12,16 +12,14 @@ public static class BuddyTranscriptionProviderFactory
 {
     public enum PreferredProvider
     {
-        AssemblyAI,
         OpenAI,
         /// <summary>"apple" in shell.json: the offline engine, which on Windows is the Windows speech recogniser.</summary>
         OfflineSpeech,
     }
 
-    /// <summary>shell.json's raw value ("assemblyai", "openai", "apple"; "windows" and "offline" also name the offline engine).</summary>
+    /// <summary>shell.json's raw value ("openai", "apple"; "windows" and "offline" also name the offline engine).</summary>
     public static PreferredProvider? ParsePreferredProvider(string? rawValue) => rawValue?.Trim().ToLowerInvariant() switch
     {
-        "assemblyai" => PreferredProvider.AssemblyAI,
         "openai" => PreferredProvider.OpenAI,
         "apple" or "windows" or "offline" => PreferredProvider.OfflineSpeech,
         _ => null,
@@ -32,7 +30,6 @@ public static class BuddyTranscriptionProviderFactory
         var provider = ResolveProvider(
             OpenClickyConfiguration.Settings.TranscriptionProvider,
             OpenClickyConfiguration.IsConfigured,
-            new AssemblyAIStreamingTranscriptionProvider(),
             new OpenAIAudioTranscriptionProvider(),
             () => new OnDeviceHearingProvider(offlineRecognizer));
         AppLog.Write($"transcription: using {provider.DisplayName}");
@@ -40,14 +37,12 @@ public static class BuddyTranscriptionProviderFactory
     }
 
     /// <summary>
-    /// The preferred provider when it is configured; a preferred cloud provider that is not falls
-    /// back to the other cloud one, then to the offline engine. No preference: AssemblyAI, then
-    /// upload, then offline.
+    /// The preferred provider when it is configured, else the offline engine. No preference: upload
+    /// when configured, then offline.
     /// </summary>
     public static IBuddyTranscriptionProvider ResolveProvider(
         string? storedPreference,
         bool isConfigured,
-        IBuddyTranscriptionProvider assemblyAIProvider,
         IBuddyTranscriptionProvider openAIProvider,
         Func<IBuddyTranscriptionProvider> makeOfflineProvider)
     {
@@ -56,23 +51,13 @@ public static class BuddyTranscriptionProviderFactory
 
         if (preferred == PreferredProvider.OfflineSpeech) return makeOfflineProvider();
 
-        if (preferred == PreferredProvider.AssemblyAI)
-        {
-            if (assemblyAIProvider.IsConfigured) return assemblyAIProvider;
-            AppLog.Write("transcription: AssemblyAI preferred but not configured, falling back");
-            if (openAIProvider.IsConfigured) return openAIProvider;
-            return makeOfflineProvider();
-        }
-
         if (preferred == PreferredProvider.OpenAI)
         {
             if (openAIProvider.IsConfigured) return openAIProvider;
             AppLog.Write("transcription: OpenAI preferred but not configured, falling back");
-            if (assemblyAIProvider.IsConfigured) return assemblyAIProvider;
             return makeOfflineProvider();
         }
 
-        if (assemblyAIProvider.IsConfigured) return assemblyAIProvider;
         if (openAIProvider.IsConfigured) return openAIProvider;
         return makeOfflineProvider();
     }

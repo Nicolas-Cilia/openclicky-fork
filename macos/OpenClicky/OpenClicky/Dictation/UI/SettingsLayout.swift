@@ -3,7 +3,7 @@
 //  OpenClicky
 //
 //  Where every setting lives, in one table: six pages in the sidebar (Dictation, Clicky, Island,
-//  Keys & Account, Privacy, General) and the pages they open (The orb, Calendars, Your words,
+//  Keys & Plans, Privacy, General) and the pages they open (The orb, Calendars, Your words,
 //  How it writes). From the Claude Design "OpenClicky settings — redesign mockups" (its
 //  settings-data.js is the same table). The rows themselves are built in the Settings*Page.swift
 //  files and the plugin folders; this file only decides their page, their group and their order.
@@ -29,7 +29,7 @@ enum SettingsLayout {
         let itemIDs: [String]
     }
 
-    static let groups: [Group] = dictationGroups + clickyGroups + islandGroups + accountGroups + privacyGroups + generalGroups
+    static let groups: [Group] = dictationGroups + clickyGroups + islandGroups + keysGroups + privacyGroups + generalGroups
 
     private static let dictationGroups: [Group] = [
         Group(page: .dictation, title: "", itemIDs: [
@@ -48,7 +48,7 @@ enum SettingsLayout {
     ]
 
     private static let clickyGroups: [Group] = [
-        Group(page: .clicky, title: "", itemIDs: ["keyboard.talk", "clicky.speechVoice", "clicky.language", "clicky.answerSource"]),
+        Group(page: .clicky, title: "", itemIDs: ["keyboard.talk", "clicky.speechVoice", "clicky.language", "clicky.answerSource", "clicky.backupSource"]),
         Group(page: .clicky, title: "Hands-free", itemIDs: [
             "clicky.fastVoice", "clicky.realtimeProvider", "clicky.fastVoiceNeedsKey", "clicky.alwaysListening",
         ]),
@@ -70,13 +70,9 @@ enum SettingsLayout {
         Group(page: .calendars, title: nil, itemIDs: ["calendar.calendars", "calendar.calendar.*"]),
     ]
 
-    private static let accountGroups: [Group] = [
-        Group(page: .account, title: "", itemIDs: ["account.profile", "account.plan", "account.usage.backend"]),
-        Group(page: .account, title: "Your keys", itemIDs: ["account.keys", "account.keysNote"]),
-        Group(page: .account, title: "Plans", itemIDs: ["account.claudeCodePlan", "account.codexPlan", "account.plansNote"]),
-        Group(page: .account, title: "Advanced", isAdvanced: true, itemIDs: [
-            "account.usage.sarvam", "account.backendHost", "account.backendToken",
-        ]),
+    private static let keysGroups: [Group] = [
+        Group(page: .keys, title: "Plans", itemIDs: ["keys.claudeCodePlan", "keys.codexPlan", "keys.plansNote"]),
+        Group(page: .keys, title: "Your keys", itemIDs: ["keys.list", "keys.keysNote"]),
     ]
 
     private static let privacyGroups: [Group] = [

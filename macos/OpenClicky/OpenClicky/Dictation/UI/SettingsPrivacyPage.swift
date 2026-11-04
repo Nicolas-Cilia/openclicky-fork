@@ -95,9 +95,9 @@ extension SettingsCatalog {
                 })),
             SettingsItem(
                 id: "privacy.whereKeys",
-                title: "Keys and account", detail: "~/.openclicky/shell.json",
+                title: "Keys", detail: "~/.openclicky/shell.json",
                 keywords: ["shell.json", "token", "file", "key"],
-                view: AnyView(SettingsRow(title: "Keys and account", detail: "~/.openclicky/shell.json") {
+                view: AnyView(SettingsRow(title: "Keys", detail: "~/.openclicky/shell.json") {
                     Button("Show in Finder") { OpenClickyConfiguration.revealSettingsFile() }
                         .pointerCursor()
                 })),
@@ -245,7 +245,7 @@ private struct PrivacySummaryNote: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 3) {
                 Text("The full privacy policy is in the project’s")
-                Button("README") { openExternalLink("https://github.com/prasanthsasikumar/openclicky#readme") }
+                Button("README") { openExternalLink("https://github.com/Nicolas-Cilia/openclicky-fork#readme") }
                     .buttonStyle(.link)
                     .pointerCursor()
                 Text(".")

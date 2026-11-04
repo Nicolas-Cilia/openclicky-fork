@@ -248,16 +248,14 @@ enum NotchVoiceDestination {
         case .parakeet:
             // Downloaded but pinned to a language it doesn't hear: downloading again would not help.
             return reason == DictationEngineResolver.parakeetLanguageNotHeardReason ? "pick a language parakeet hears ›" : "download parakeet ›"
-        case .offline, .openclicky, .assemblyai:
-            return "set up backend ›"
+        case .offline, .openAI:
+            return "add openai key ›"
         }
     }
 
     /// The place in the window that fixes the engine.
     enum SetupDestination: Equatable {
-        /// Settings → Account: a sign-in is missing.
-        case accountSettings
-        /// Settings → Keys & Plans: the engine's own key (Sarvam) is missing.
+        /// Settings → Keys & Plans: the engine's own key is missing.
         case keySettings
         /// Settings → Dictation: the engines, and Parakeet's download next to its option.
         case dictationSettings
@@ -267,7 +265,6 @@ enum NotchVoiceDestination {
         /// The warning's button, named for the page it really opens.
         var buttonTitle: String {
             switch self {
-            case .accountSettings: return "open account settings"
             case .keySettings: return "add a key"
             case .dictationSettings: return "open dictation settings"
             case .languageSettings: return "open language settings"
@@ -276,23 +273,20 @@ enum NotchVoiceDestination {
     }
 
     /// Where the engine is fixed, given why it can't run (nil: it can, and the pill opens the
-    /// engines). An engine on this Mac needs no key or account: what it can miss is its download
+    /// engines). An engine on this Mac needs no key: what it can miss is its download
     /// (Settings → Dictation) or, for Parakeet, a language it hears.
     static func setupDestination(for engine: DictationEngineChoice, unavailableReason: String?) -> SetupDestination {
         guard let unavailableReason else { return .dictationSettings }
         if unavailableReason == DictationEngineResolver.parakeetLanguageNotHeardReason { return .languageSettings }
         if engine.isOnDevice { return .dictationSettings }
-        // A missing key is added on Keys & Plans; a missing sign-in on Account.
-        if engine == .sarvam || unavailableReason == "needs your own key" { return .keySettings }
-        return .accountSettings
+        return .keySettings
     }
 
     /// Where the pill (and the warning in the panel's body) sends the user.
     @MainActor
     static func openSetup(for engine: DictationEngineChoice, companionManager: CompanionManager) {
         switch setupDestination(for: engine, unavailableReason: DictationEngineResolver.unavailableReason(for: engine)) {
-        case .accountSettings: companionManager.showSettings(.account)
-        case .keySettings: companionManager.showSettings(.account)
+        case .keySettings: companionManager.showSettings(.keys)
         case .dictationSettings, .languageSettings: companionManager.showSettings(.dictation)
         }
     }
@@ -431,8 +425,8 @@ struct NotchEngineWarning: Equatable {
     let engine: DictationEngineChoice
 
     /// Nil when the engine can run. Otherwise the resolver's own reason, so the island says what is
-    /// really missing (Parakeet's download or its language, a key, an account) rather than one
-    /// "needs the backend" for everything, and a button named for the page it opens.
+    /// really missing (Parakeet's download or its language, a key) rather than one
+    /// catch-all for everything, and a button named for the page it opens.
     init?(engine: DictationEngineChoice) {
         self.init(engine: engine, unavailableReason: DictationEngineResolver.unavailableReason(for: engine))
     }

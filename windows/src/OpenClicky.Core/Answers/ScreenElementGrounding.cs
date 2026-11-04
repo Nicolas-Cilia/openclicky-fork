@@ -1,8 +1,7 @@
 // Wires Pointing/ScreenElementGrounder to ClaudeAPI, as macos/OpenClicky/OpenClicky/ScreenElementGrounder.swift
 // does in `locate(label:text:userRequest:in:)`: the route ProviderRouter picks for Claude becomes a
 // GroundingRoute (own Anthropic key: Claude at Anthropic directly; another answer key: its own
-// provider; else the backend's /chat on the account), and the request goes through
-// `ClaudeAPI("{backendBaseURL}/chat", model: ScreenElementGrounder.Model).AnalyzeImageAsync`.
+// provider), and the request goes through `ClaudeAPI(ScreenElementGrounder.Model).AnalyzeImageAsync`.
 
 using OpenClicky.Core.Configuration;
 using OpenClicky.Core.Pointing;
@@ -17,7 +16,6 @@ public static class ScreenElementGrounding
     {
         ProviderRouteKind.Unavailable => new GroundingRoute.Unavailable(route.Sentence ?? ""),
         ProviderRouteKind.AnthropicDirect => new GroundingRoute.AnthropicDirect(),
-        ProviderRouteKind.Backend => new GroundingRoute.Backend(),
         ProviderRouteKind.OpenAIDirect => new GroundingRoute.OpenAIDirect(),
         _ => new GroundingRoute.AnswerProvider(route.Source!.Value.DisplayName(),
                                                route.Source is AnswerSource.ClaudeCodePlan or AnswerSource.CodexPlan),
@@ -41,7 +39,7 @@ public static class ScreenElementGrounding
     /// screenshot, on the route shell.json gives now. Null when nothing can answer (or only a
     /// plan), the request fails, or Claude answers [POINT:none]; app.log says when it could not ask.
     /// </summary>
-    /// <param name="api">The client to ask; null builds one on the backend's /chat with the grounder's model.</param>
+    /// <param name="api">The client to ask; null builds one with the grounder's model.</param>
     public static Task<ScreenElementGrounder.Located?> LocateAsync(
         string label,
         string text,
@@ -53,7 +51,7 @@ public static class ScreenElementGrounding
         CancellationToken cancellationToken = default)
     {
         var route = GroundingRouteFor(ProviderRouter.Current(ProviderCapability.Claude));
-        api ??= new ClaudeAPI(() => $"{OpenClickyConfiguration.BackendBaseUrl}/chat", ScreenElementGrounder.Model);
+        api ??= new ClaudeAPI(ScreenElementGrounder.Model);
         return ScreenElementGrounder.LocateAsync(label, text, userRequest, imageData, screenshotWidthInPixels, screenshotHeightInPixels,
                                                  route, AnalyzeImageThrough(api, cancellationToken), AppLog.Write);
     }

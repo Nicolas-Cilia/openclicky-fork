@@ -159,7 +159,7 @@ public sealed class IslandWindow : Window
             IslandExpansion.Compact => model.IsShowingCaption ? "caption" : "status",
             IslandExpansion.Connect => "connect:" + model.ConnectPrompt?.GetHashCode() + model.ConnectPrompt?.Stage,
             IslandExpansion.Permission => "permission:" + model.PermissionPrompt?.Stage + model.PermissionPrompt?.Status,
-            IslandExpansion.Tour => "tour:" + model.TourCard?.GetHashCode() + model.TourCard?.Status + model.TourCard?.Field + model.TourCard?.PrimaryTitle,
+            IslandExpansion.Tour => "tour:" + model.TourCard?.GetHashCode() + model.TourCard?.Status + model.TourCard?.PrimaryTitle,
             // The slot's component, the capsule's and the tools' buttons and home's columns are part of the panel.
             IslandExpansion.Full => "full:" + model.Placement + ":" + model.Selection.Active + ":" + string.Join(",", model.Selection.Available)
                 + ":" + model.HomeLayout,
@@ -478,17 +478,6 @@ public sealed class IslandWindow : Window
             {
                 firstTime.FocusField();
             }
-        }
-    }
-
-    public async void FocusTourField()
-    {
-        TakeKeyboard();
-        foreach (var delayMilliseconds in new[] { 50, 200, 350 })
-        {
-            await Task.Delay(delayMilliseconds);
-            if (isClosed || model.Expansion != IslandExpansion.Tour) return;
-            if (currentContent is TourCardView tourCard) tourCard.FocusField();
         }
     }
 

@@ -265,7 +265,7 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
                 do {
                     try await withThrowingTaskGroup(of: Void.self) { group in
                         group.addTask { try await client.connectIfNeeded(mode: .alwaysOn) }
-                        group.addTask { try await Task.sleep(nanoseconds: 20_000_000_000); throw RealtimeVoiceError.backend("connect timed out after 20 s") }
+                        group.addTask { try await Task.sleep(nanoseconds: 20_000_000_000); throw RealtimeVoiceError.refused("connect timed out after 20 s") }
                         try await group.next()
                         group.cancelAll()
                     }
@@ -549,7 +549,7 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
                 print("teacher-ask: route \(ProviderRouter.current(for: .claude).logName)")
                 let captures = (try? await CompanionScreenCaptureUtility.captureAllScreensAsJPEG()) ?? []
                 let cursorCapture = captures.first(where: { $0.isCursorScreen }) ?? captures.first
-                let api = ClaudeAPI(currentProxyURL: { "\(OpenClickyConfiguration.backendBaseURL)/chat" })
+                let api = ClaudeAPI()
                 let startedAt = Date()
                 var firstTextAt: Date?
                 do {
@@ -592,7 +592,7 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 let route = ProviderRouter.current(for: .claude)
                 print("answer-smoke: route \(route.logName)")
-                let api = ClaudeAPI(currentProxyURL: { "\(OpenClickyConfiguration.backendBaseURL)/chat" })
+                let api = ClaudeAPI()
                 let redSquare = AnswerSourceCheck.redSquarePNG()
                 var chunks = 0
                 do {
@@ -620,8 +620,6 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
 
         UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 0])
 
-        ClickyAnalytics.configure()
-        ClickyAnalytics.trackAppOpened()
 
         // The icon colour picked in Settings → General (the Dock and OpenClicky's windows).
         companionManager.dictationSettings.appIconColor.apply()

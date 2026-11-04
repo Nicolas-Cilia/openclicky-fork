@@ -23,10 +23,8 @@ public interface IDictationProviderFactory
     IBuddyTranscriptionProvider MakeParakeet(Func<string?> bareLanguageCode);
     /// <summary>Sarvam, reading the dictation language when a take starts.</summary>
     IBuddyTranscriptionProvider MakeSarvam(Func<DictationLanguage> language);
-    /// <summary>Upload transcription (OpenAI, or the backend's /agent/transcribe); the bare language read when a take starts, null = detect.</summary>
-    IBuddyTranscriptionProvider MakeOpenClicky(Func<string?> bareLanguageCode);
-    /// <summary>AssemblyAI streaming; the bare language read when a take starts, null = detect.</summary>
-    IBuddyTranscriptionProvider MakeAssemblyAI(Func<string?> bareLanguageCode);
+    /// <summary>Upload transcription on an own OpenAI key; the bare language read when a take starts, null = detect.</summary>
+    IBuddyTranscriptionProvider MakeOpenAI(Func<string?> bareLanguageCode);
 }
 
 /// <summary>Builds the transcription provider the settings ask for, and says why one cannot be used.</summary>
@@ -40,21 +38,15 @@ public static class DictationEngineResolver
             DictationEngineChoice.Parakeet => factory.MakeParakeet(() => settings.Language.BareCode),
             DictationEngineChoice.Sarvam => factory.MakeSarvam(() => settings.Language),
             // The styles page's language, read when a take starts; auto sends none so the model detects it.
-            DictationEngineChoice.OpenClicky => factory.MakeOpenClicky(() => settings.Language.BareCode),
-            _ => factory.MakeAssemblyAI(() => settings.Language.BareCode),
+            _ => factory.MakeOpenAI(() => settings.Language.BareCode),
         };
 
     /// <summary>Null when the engine can be used; otherwise one line saying what is missing.</summary>
     public static string? UnavailableReason(DictationEngineChoice choice) =>
-        UnavailableReason(choice, AccountCapabilities.Current().Kind, OpenClickyConfiguration.IsConfigured,
-            OpenClickyConfiguration.HasAccountToken, OpenClickyConfiguration.Settings.SarvamKey);
+        UnavailableReason(choice, ProviderCapabilities.Current().HasOwnOpenAIKey, OpenClickyConfiguration.Settings.SarvamKey);
 
-    /// <summary>
-    /// The backend engines hear through OpenAI (/agent/transcribe, or OpenAI itself on an own key) and
-    /// AssemblyAI (/transcribe-token, minted on OpenClicky's key: account only), neither of which a
-    /// free account's grant covers.
-    /// </summary>
-    public static string? UnavailableReason(DictationEngineChoice choice, AccountKind kind, bool isConfigured, bool signedIn, string? sarvamKey,
+    /// <summary>OpenAI hears on the person's own key.</summary>
+    public static string? UnavailableReason(DictationEngineChoice choice, bool hasOpenAIKey, string? sarvamKey,
                                             bool? parakeetInstalled = null, Func<string?>? bareLanguageCode = null,
                                             bool? moonshineInstalled = null)
     {
@@ -71,10 +63,7 @@ public static class DictationEngineResolver
             case DictationEngineChoice.Sarvam:
                 return SarvamUnavailableReason(sarvamKey);
             default:
-                if (!isConfigured) return "needs an openclicky account or your openai key";
-                if (kind == AccountKind.Account) return "needs your own key";
-                if (choice == DictationEngineChoice.AssemblyAI && !signedIn) return "needs an openclicky account: assemblyai runs on openclicky's key";
-                return null;
+                return hasOpenAIKey ? null : "needs your own openai key";
         }
     }
 
@@ -109,34 +98,25 @@ public static class DictationEngineResolver
         string.IsNullOrWhiteSpace(sarvamKey) ? "needs your sarvam key" : null;
 
     /// <summary>The ways to get a model, for a Hey Clicky edit or a history question asked with none set up.</summary>
-    public const string HowToGetAModelSentence = "one of your own keys (settings → account), or an openclicky account";
+    public const string HowToGetAModelSentence = "one of your own keys (settings → keys & plans)";
 
     /// <summary>
     /// The model that polishes takes and answers Hey Clicky: Sarvam with a key, else the person's
-    /// own OpenAI, Anthropic, Groq, Gemini, Mistral, OpenRouter or xAI key, else the backend with an
-    /// account, else none. (The Mac asks Apple's on-device model first; Windows has none.)
+    /// own OpenAI, Anthropic, Groq, Gemini, Mistral, OpenRouter or xAI key, else none. A plan's CLI starts
+    /// too slowly to tidy a take. (The Mac asks Apple's on-device model first; Windows has none.)
     /// </summary>
     public static ITakePolisher? MakePolisher() =>
-        MakePolisher(OpenClickyConfiguration.Settings.SarvamKey, ProviderRouter.CurrentCredentials(), AccountCapabilities.Current().Kind);
+        MakePolisher(OpenClickyConfiguration.Settings.SarvamKey, ProviderRouter.CurrentCredentials());
 
-    public static ITakePolisher? MakePolisher(string? sarvamKey, ProviderCredentials credentials, AccountKind kind)
+    public static ITakePolisher? MakePolisher(string? sarvamKey, ProviderCredentials credentials)
     {
         var trimmedSarvamKey = sarvamKey?.Trim() ?? "";
         if (trimmedSarvamKey.Length > 0) return new SarvamTakePolisher(new SarvamSpeechClient(trimmedSarvamKey));
-        // Own keys first: an OpenAI key polishes on OpenAI (BackendTakePolisher routes it there),
-        // an Anthropic key alone polishes on Claude Haiku at Anthropic, any other answer key on its
-        // own vendor. No account needed for any of them.
-        if (credentials.OpenAIKey is null)
-        {
-            if (credentials.AnthropicKey is { } anthropicKey) return new AnthropicTakePolisher(anthropicKey);
-            if (AnswerKeyTakePolisher.FirstAvailable(credentials) is { } answerKeyPolisher) return answerKeyPolisher;
-        }
-        return kind switch
-        {
-            AccountKind.Account => new AccountTakePolisher(),
-            AccountKind.OwnKeys => new BackendTakePolisher(),
-            _ => null,
-        };
+        // An OpenAI key polishes on OpenAI, an Anthropic key alone on Claude Haiku at Anthropic, any
+        // other answer key on its own vendor.
+        if (credentials.OpenAIKey is not null) return new OpenAITakePolisher();
+        if (credentials.AnthropicKey is { } anthropicKey) return new AnthropicTakePolisher(anthropicKey);
+        return AnswerKeyTakePolisher.FirstAvailable(credentials);
     }
 
     /// <summary>

@@ -7,8 +7,8 @@
 //  shows the keys (animated, pressed and held) for each thing OpenClicky does (dictate, ask, hand
 //  over a task) and moves on only when it has seen that thing work: a take with words, a spoken
 //  answer, an agent task or quick action. Speech recognition is asked for before the first take.
-//  Nobody types anything to start: a Mac with no key and no account gets a guest account on
-//  OpenClicky's credits (no email), and only at the end may the person add an email, or skip it.
+//  Dictation works with nothing set up; asking and tasks point at connecting Claude or Codex in
+//  Settings → Keys & Plans when nothing can answer yet.
 //  Before asking, Clicky shows how: it points at something on the screen and says a few words.
 //  Each card's line is narrated from a bundled recording (RecordedVoice). The step is kept in
 //  UserDefaults, so the Screen Recording relaunch picks the tour up where it was.
@@ -20,7 +20,7 @@ import Speech
 import SwiftUI
 
 enum FirstRunTourStep: String {
-    case meet, dictate, talk, act, account, done
+    case meet, dictate, talk, act, done
     /// Not part of the tour: asked once, after a few uses (`noteUse`).
     case openAtLogin
 
@@ -30,14 +30,13 @@ enum FirstRunTourStep: String {
         case .dictate: return 0
         case .talk: return 1
         case .act: return 2
-        case .meet, .account, .done, .openAtLogin: return nil
+        case .meet, .done, .openAtLogin: return nil
         }
     }
 }
 
 /// What the island's tour card shows.
 struct FirstRunTourCard: Equatable {
-    enum FieldKind: Equatable { case email, code }
 
     var step: FirstRunTourStep
     var title: String
@@ -52,8 +51,6 @@ struct FirstRunTourCard: Equatable {
     /// drawn louder once that microphone seems to hear nothing.
     var microphoneName: String?
     var microphoneNeedsAttention = false
-    /// The account step's field on the island: an email, then a code if the email has an account.
-    var field: FieldKind?
     var primaryTitle: String?
     var secondaryTitle: String
 }
@@ -61,8 +58,6 @@ struct FirstRunTourCard: Equatable {
 @MainActor
 final class FirstRunTourController: ObservableObject {
     @Published private(set) var card: FirstRunTourCard?
-    /// What is typed in the account step's field.
-    @Published var fieldText = ""
 
     private static let stepKey = "openclicky.firstRunTour.step"
     private static let doneKey = "openclicky.firstRunTour.done"
@@ -168,12 +163,6 @@ final class FirstRunTourController: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in DispatchQueue.main.async { self?.publish() } }
             .store(in: &cancellables)
-        OpenClickyAuthSession.shared.$emailFlow
-            .removeDuplicates()
-            .sink { [weak self] flow in DispatchQueue.main.async { self?.emailFlowChanged(flow) } }
-            .store(in: &cancellables)
-        // Whether new accounts are taken decides if the account step is offered at all.
-        Task { await OpenClickyAuthSession.shared.refreshAccountsOpen() }
     }
 
     private func takeFinished(_ take: TakeRecord) {
@@ -269,43 +258,6 @@ final class FirstRunTourController: ObservableObject {
         }
     }
 
-    private func emailFlowChanged(_ flow: OpenClickyAuthSession.EmailFlowState) {
-        guard step == .account else { return }
-        switch flow {
-        case .signedIn:
-            ShellSettingsRevision.shared.noteChanged()
-            fieldText = ""
-            succeed(with: "✓ saved. there’s a code in your inbox to confirm it whenever you like.")
-        case .needsCode(let email):
-            fieldText = ""
-            status = "that email has an account. type the 6-digit code i sent to \(email)."
-            statusIsGood = false
-            publish()
-            focusField()
-        case .sending, .checkingCode:
-            status = "one moment…"
-            statusIsGood = false
-            publish()
-        case .failed(let message):
-            status = message
-            statusIsGood = false
-            publish()
-        case .idle:
-            break
-        }
-    }
-
-    /// The tour's last note before "all set", on a free account: it has limited credits, and an
-    /// AI subscription the person already pays for can be used instead by adding its key.
-    private var needsFreeAccountNote: Bool {
-        // Questions are answered on OpenClicky's credits (no key or plan of their own answers).
-        ProviderRouter.route(for: .claude, credentials: ProviderRouter.currentCredentials()) == .backend
-    }
-
-    /// No key and no account (the guest start did not work): the account card asks for an email
-    /// instead, which is how asking gets switched on.
-    private var accountCardAsksForEmail: Bool { !OpenClickyConfiguration.isConfigured }
-
     private var idleWatchTimer: Timer?
 
     /// Runs `action` once the mouse has stayed put for 2 s, starting `delay` seconds from now.
@@ -332,16 +284,6 @@ final class FirstRunTourController: ObservableObject {
 
     /// Clicky is pointing at something and talking about it before the talk step's "your turn".
     private var isShowingDemo = false
-    /// The step "set up" left from (asking or a task with nothing set up), to come back to once
-    /// the email gave the Mac an account.
-    private var stepAfterAccount: FirstRunTourStep?
-
-    private func focusField() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            self?.companionManager?.notchHUDManager.focusTourField()
-        }
-    }
-
     private func taskStarted() {
         guard step == .act else { return }
         succeed(with: "✓ on it. results show up in the island.", saying: .tourActDone)
@@ -370,11 +312,7 @@ final class FirstRunTourController: ObservableObject {
         case .meet: go(to: .dictate)
         case .dictate: go(to: .talk)
         case .talk: go(to: .act)
-        case .act: go(to: needsFreeAccountNote ? .account : .done)
-        case .account:
-            let next = stepAfterAccount ?? .done
-            stepAfterAccount = nil
-            go(to: next)
+        case .act: go(to: .done)
         case .done, .none: finish()
         case .openAtLogin: closeOpenAtLoginOffer()
         }
@@ -399,14 +337,6 @@ final class FirstRunTourController: ObservableObject {
                 guard let self, self.step == .meet else { return }
                 self.companionManager?.pointAtTourPrimaryButton(saying: "tap let’s go")
             }
-            // Nothing to type to get going: a Mac with no key and no account starts as a guest on
-            // OpenClicky's credits, so asking and tasks work in this very tour.
-            if !OpenClickyConfiguration.isConfigured {
-                Task { [weak self] in
-                    await OpenClickyAuthSession.shared.startGuestWithoutEmail()
-                    self?.publish()
-                }
-            }
         case .dictate:
             if companionManager?.dictationSettings.dictationKey == .fn && !speechNeedsAllowing {
                 companionManager?.recordedVoice.play(.tourDictate)
@@ -424,14 +354,6 @@ final class FirstRunTourController: ObservableObject {
             }
         case .act:
             if OpenClickyConfiguration.isConfigured { companionManager?.recordedVoice.play(.tourAct) }
-        case .account:
-            fieldText = ""
-            if accountCardAsksForEmail {
-                OpenClickyAuthSession.shared.forgetSettledFlow()
-                focusField()
-            } else {
-                companionManager?.recordedVoice.play(.tourAccount)
-            }
         case .done:
             companionManager?.recordedVoice.play(.tourDone)
         case .openAtLogin:
@@ -519,23 +441,11 @@ final class FirstRunTourController: ObservableObject {
                 offersMicrophoneChange = false
                 publish()
             }
-        case .account:
-            if accountCardAsksForEmail {
-                submitField()
-            } else {
-                // "add my key": Settings → Keys & Account has the key fields; the tour carries on.
-                companionManager.showSettings(.account)
-                advance()
-            }
         case .talk, .act:
-            // Tried it (or would rather not): "next" moves on, as the success would.
+            // Tried it (or would rather not): "next" moves on, as the success would. With nothing
+            // set up to answer, "connect" opens the page where Claude or Codex is switched on.
             guard !OpenClickyConfiguration.isConfigured else { advance(); return }
-            if OpenClickyAuthSession.shared.accountsOpen != false {
-                stepAfterAccount = step
-                go(to: .account)
-            } else {
-                companionManager.showSettings(.account)
-            }
+            companionManager.showSettings(.keys)
         case .done:
             companionManager.showSettings(.general)
             finish()
@@ -554,30 +464,8 @@ final class FirstRunTourController: ObservableObject {
         switch step {
         case .meet: finish()
         case .done: finish()
-        case .dictate, .account, .talk, .act: advance()
+        case .dictate, .talk, .act: advance()
         case .openAtLogin: closeOpenAtLoginOffer()
-        }
-    }
-
-    /// The account step's field: an email starts a free account (or asks for a code when that
-    /// email has one); a code finishes signing in.
-    func submitField() {
-        let auth = OpenClickyAuthSession.shared
-        let typed = fieldText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if case .needsCode = auth.emailFlow {
-            guard EmailAccountForm.canSubmitCode(typed) else {
-                status = "the code is the 6 digits in the email."
-                publish()
-                return
-            }
-            Task { await auth.submitCode(typed) }
-        } else {
-            guard EmailAccountForm.canSubmitEmail(typed) else {
-                status = "that doesn’t look like an email yet."
-                publish()
-                return
-            }
-            Task { await auth.start(email: typed) }
         }
     }
 
@@ -598,10 +486,10 @@ final class FirstRunTourController: ObservableObject {
         publish()
     }
 
-    /// What to try on the task step. The agent (your own keys) can work in apps; a free account
-    /// has the quick actions (folders, apps, sites, volume).
+    /// What to try on the task step. The agent can work in apps; without it there are the quick
+    /// actions (folders, apps, sites, volume).
     private var taskExamples: String {
-        if AccountCapabilities.current().usesAgent {
+        if ProviderCapabilities.current().usesAgent {
             return "hold control + option and say “add a note to my notes: buy milk”, or “organize my downloads folder so it’s easier to find things”."
         }
         return "hold control + option and say “make a folder on my desktop called hello clicky”, or “open notes”."
@@ -644,19 +532,6 @@ final class FirstRunTourController: ObservableObject {
                 microphoneName: companionManager.map { MicrophoneMenu.deviceName(settings: $0.dictationSettings) },
                 microphoneNeedsAttention: offersMicrophoneChange,
                 primaryTitle: needsFnFreed ? "free fn" : (suggestsBuiltInMicrophone ? "use built-in mic" : nil), secondaryTitle: "skip")
-        case .account where accountCardAsksForEmail:
-            let needsCode: Bool = { if case .needsCode = OpenClickyAuthSession.shared.emailFlow { return true } else { return false } }()
-            return FirstRunTourCard(
-                step: .account, title: "switch on asking",
-                detail: "add your email for a free account and i’ll answer questions and do things for you. no password.",
-                symbol: "envelope.fill", status: status, statusIsGood: statusIsGood,
-                field: needsCode ? .code : .email,
-                primaryTitle: needsCode ? "confirm" : "start", secondaryTitle: "skip")
-        case .account:
-            return FirstRunTourCard(
-                step: .account, title: "you’re on a free account",
-                detail: "it has a limited number of free credits. if you already pay for openai, claude or another ai, add that key in settings and use it right here.",
-                symbol: "sparkles", primaryTitle: "add my key", secondaryTitle: "continue")
         case .talk where isShowingDemo:
             return FirstRunTourCard(
                 step: .talk, title: "watch this",
@@ -667,15 +542,15 @@ final class FirstRunTourController: ObservableObject {
                 step: .talk, title: canAsk ? "your turn: ask me something" : "you can ask me things too",
                 detail: canAsk
                     ? "hold control + option and ask “what’s this?” about anything on your screen. i answer out loud and point."
-                    : "about anything on your screen, out loud, and i’ll point at it. add your email to switch it on, free.",
+                    : "about anything on your screen, out loud, and i’ll point at it. connect claude or codex in settings to switch it on.",
                 keys: ["⌃", "⌥"], status: status, statusIsGood: statusIsGood,
-                primaryTitle: canAsk ? "next" : "add email", secondaryTitle: "skip")
+                primaryTitle: canAsk ? "next" : "connect", secondaryTitle: "skip")
         case .act:
             return FirstRunTourCard(
                 step: .act, title: canAsk ? "hand me a task" : "i can do things for you too",
-                detail: canAsk ? taskExamples : "open apps, make folders, and more, just by asking. add your email to switch it on, free.",
+                detail: canAsk ? taskExamples : "open apps, make folders, and more, just by asking. connect claude or codex in settings to switch it on.",
                 keys: ["⌃", "⌥"], status: status, statusIsGood: statusIsGood,
-                primaryTitle: canAsk ? "next" : "add email", secondaryTitle: "skip")
+                primaryTitle: canAsk ? "next" : "connect", secondaryTitle: "skip")
         case .done:
             return FirstRunTourCard(
                 step: .done, title: "you’re all set",
@@ -731,19 +606,6 @@ struct FirstRunTourCardView: View {
                     .lineSpacing(1)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
-                if let field = card.field {
-                    NotchComposerTextField(
-                        text: $controller.fieldText,
-                        placeholder: field == .email ? "you@example.com" : "6-digit code",
-                        onSubmit: { controller.submitField() },
-                        onEscape: {}
-                    )
-                    .frame(height: 22)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(DS.HUD.surfaceRaised))
-                    .padding(.top, 4)
-                }
                 if let status = card.status {
                     Text(status)
                         .font(.system(size: 12, weight: .medium))

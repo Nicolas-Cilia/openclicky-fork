@@ -42,9 +42,9 @@ struct DictationWindowNavigationTests {
         // Otherwise "change engine" or the island's "open settings…" would leave results on screen.
         let model = DictationWindowModel()
         model.searchText = "microphone"
-        model.open(settingsPage: .account)
+        model.open(settingsPage: .keys)
         #expect(!model.isSearching)
-        #expect(model.destination == .settings(.account))
+        #expect(model.destination == .settings(.keys))
     }
 
     @Test func whitespaceIsNotASearch() {
@@ -61,7 +61,7 @@ struct DictationWindowNavigationTests {
     }
 
     @Test func theSidebarListsSixPages() {
-        #expect(DictationSettingsPage.sidebarPages.map(\.title) == ["Dictation", "Clicky", "Island", "Keys & Account", "Privacy", "General"])
+        #expect(DictationSettingsPage.sidebarPages.map(\.title) == ["Dictation", "Clicky", "Island", "Keys & Plans", "Privacy", "General"])
     }
 
     @Test func pagesOpenedFromARowKeepTheirParentSelected() {

@@ -12,26 +12,28 @@ struct AskLaneFailureTests {
         #expect(CompanionManager.isCancellation(NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)))
         #expect(CompanionManager.isCancellation(CancellationError()))
         #expect(!CompanionManager.isCancellation(URLError(.timedOut)))
-        #expect(!CompanionManager.isCancellation(BackendHTTPError(service: .answers, status: 500, body: Data())))
+        #expect(!CompanionManager.isCancellation(AnswerHTTPError(status: 500, body: Data())))
     }
 
-    // F-34: a screenshot that cannot be taken is not a backend or token problem.
+    // F-34: a screenshot that cannot be taken is not a key problem.
     @Test func aCaptureFailureNamesScreenRecordingNotTheToken() {
         let captureError = CompanionManager.AskScreenCaptureError(
             underlyingError: NSError(domain: "com.apple.ScreenCaptureKit.SCStreamErrorDomain", code: -3801))
         let permissionOff = CompanionManager.askFailureSentence(for: captureError, screenRecordingAllowed: false)
         #expect(permissionOff.contains("screen recording"))
-        #expect(!permissionOff.contains("token"))
+        #expect(!permissionOff.contains("key"))
         let permissionOn = CompanionManager.askFailureSentence(for: captureError, screenRecordingAllowed: true)
         #expect(permissionOn.contains("see your screen"))
-        #expect(!permissionOn.contains("token"))
+        #expect(!permissionOn.contains("key"))
     }
 
-    @Test func theTokenSentenceIsKeptForARefusedToken() {
-        let forbidden = BackendHTTPError(service: .answers, status: 403, body: Data())
+    @Test func aRefusedKeyIsSaidToBeTheKey() {
+        let forbidden = AnswerHTTPError(status: 403, body: Data())
         #expect(CompanionManager.askFailureSentence(for: forbidden, screenRecordingAllowed: true)
-                == "something went wrong talking to the openclicky backend. check the backend and your token in the settings file.")
-        let serverError = BackendHTTPError(service: .answers, status: 500, body: Data())
+                == CompanionManager.ownKeyRefusedSentence)
+        #expect(CompanionManager.isKeyRejection(AnswerHTTPError(status: 401, body: Data())))
+        #expect(!CompanionManager.isKeyRejection(AnswerHTTPError(status: 500, body: Data())))
+        let serverError = AnswerHTTPError(status: 500, body: Data())
         #expect(CompanionManager.askFailureSentence(for: serverError, screenRecordingAllowed: true)
                 == "something went wrong getting your answer. please ask again.")
         #expect(CompanionManager.askFailureSentence(for: URLError(.notConnectedToInternet), screenRecordingAllowed: true).contains("internet"))

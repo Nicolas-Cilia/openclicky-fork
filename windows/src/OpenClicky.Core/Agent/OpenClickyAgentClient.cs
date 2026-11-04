@@ -15,6 +15,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using OpenClicky.Core.Configuration;
 using OpenClicky.Core.Platform;
+using OpenClicky.Core.Providers;
 
 namespace OpenClicky.Core.Agent;
 
@@ -27,6 +28,8 @@ public sealed class OpenClickyAgentRunResult
     public string? ThreadId { get; set; }
     public string Status { get; set; } = "unknown";
     public string? ErrorMessage { get; set; }
+    /// <summary>Token counts for the turn, from the CLI.</summary>
+    public JsonObject? Usage { get; set; }
 }
 
 /// <summary>One Codex thread as reported by `openclicky threads list --json`.</summary>
@@ -197,6 +200,7 @@ public sealed class OpenClickyAgentEventCollector(Action<string>? onEvent = null
                 Result.Status = "completed";
                 break;
             case "result":
+                Result.Usage = json["usage"] as JsonObject;
                 Result.ThreadId = AgentJson.String(json["threadId"]);
                 Result.Artifacts = json["artifacts"] is JsonArray ? AgentJson.Strings(json["artifacts"]) : [];
                 Result.Status = AgentJson.String(json["status"]) ?? "completed";
@@ -367,6 +371,23 @@ public sealed class OpenClickyAgentClient
         return result.StandardOutput;
     }
 
+    /// <summary>Counts the task against the plan that ran it, and notices when the plan has run out.</summary>
+    private static void ReportUsage(OpenClickyAgentRunResult result)
+    {
+        var onPlan = !ProviderCapabilities.Current().HasOwnOpenAIKey;
+        if (result.Usage is { } usage)
+        {
+            int Count(string key) => usage[key] is JsonValue value && value.TryGetValue<int>(out var count) ? count : 0;
+            PlanUsageLedger.Shared.Record(new PlanUsageSample(
+                DateTimeOffset.UtcNow, (onPlan ? AnswerSource.CodexPlan : AnswerSource.OpenAI).Id(), PlanUsageLane.Agent,
+                Count("inputTokens"), Count("cachedInputTokens"), Count("outputTokens")));
+        }
+        if (!onPlan) return;
+        _ = result.ErrorMessage is { } message && PlanLimitText.Matches(message)
+            ? PlanLimitStore.Shared.NoteLimitHitAsync(AnswerSource.CodexPlan)
+            : PlanLimitStore.Shared.RefreshCodexAsync();
+    }
+
     private async Task<OpenClickyAgentRunResult> ExecuteAsync(IReadOnlyList<string> arguments, Action<string>? onEvent, CancellationToken cancellationToken)
     {
         var (_, request) = Launch(arguments);
@@ -420,6 +441,7 @@ public sealed class OpenClickyAgentClient
 
                 lock (collectorLock) collector.Flush();
                 var result = collector.Result;
+                ReportUsage(result);
                 if (terminationStatus != 0 && result.ErrorMessage is null)
                 {
                     result.ErrorMessage = collector.LastStandardErrorLine ?? $"openclicky exited with status {terminationStatus}";

@@ -19,11 +19,10 @@ const fakeCodex = path.join(here, "fixtures", "fake-codex.mjs");
 
 let server: http.Server;
 let url: string;
-const signInRequests: Array<{ email: string; password: string }> = [];
 
 function runCli(args: string[], env: Record<string, string> = {}): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const p = spawn(tsx, [cli, ...args], { env: { ...process.env, BACKEND_URL: url, OPENCLICKY_TOKEN: "cli-token", OPENCLICKY_CODEX_HOME: fs.mkdtempSync(path.join(os.tmpdir(), "oc-cli-home-")), ...env } });
+    const p = spawn(tsx, [cli, ...args], { env: { ...process.env, OPENCLICKY_OPENAI_BASE_URL: `${url}/v1`, OPENCLICKY_OPENAI_KEY: "cli-token", OPENCLICKY_ANTHROPIC_BASE_URL: url, OPENCLICKY_ANTHROPIC_KEY: "cli-token", OPENCLICKY_CODEX_HOME: fs.mkdtempSync(path.join(os.tmpdir(), "oc-cli-home-")), ...env } });
     let stdout = "";
     let stderr = "";
     p.stdout.on("data", (d) => (stdout += d));
@@ -38,19 +37,7 @@ beforeAll(async () => {
     req.on("data", (d) => (b += d));
     req.on("end", () => {
       const body = b ? JSON.parse(b) : {};
-      // Fake Supabase sign-in + session-token exchange for the `token` command's password tests
-      // (agent/src/cli.ts): neither uses the "cli-token" bearer the rest of this server requires.
-      if (req.url?.startsWith("/auth/v1/token")) {
-        signInRequests.push({ email: body.email, password: body.password });
-        res.writeHead(200, { "content-type": "application/json" });
-        return void res.end(JSON.stringify({ access_token: "fake-access-token" }));
-      }
-      if (req.url === "/agent/session-token") {
-        if (req.headers.authorization !== "Bearer fake-access-token") return void res.writeHead(401).end();
-        res.writeHead(200, { "content-type": "application/json" });
-        return void res.end(JSON.stringify({ token: "exchanged-session-token", expiresAt: Math.floor(Date.now() / 1000) + 3600 }));
-      }
-      if (req.headers.authorization !== "Bearer cli-token") return void res.writeHead(401, { "content-type": "application/json" }).end('{"error":"bad token"}');
+      if (req.headers.authorization !== "Bearer cli-token" && req.headers["x-api-key"] !== "cli-token") return void res.writeHead(401, { "content-type": "application/json" }).end('{"error":"bad token"}');
       if (req.url === "/v1/chat/completions") {
         res.writeHead(200, { "content-type": "text/event-stream" });
         for (const w of ["Hello ", "from ", "fake"]) res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: w } }] })}\n\n`);
@@ -113,11 +100,11 @@ describe("openclicky CLI", () => {
     expect(lines.at(-1)).toEqual({ type: "answer", text: "Hello from fake" });
   });
 
-  it("fails with a non-zero exit and an error line on a bad token", async () => {
-    const r = await runCli(["ask", "hi"], { OPENCLICKY_TOKEN: "wrong" });
+  it("fails with a non-zero exit and an error line on a bad key", async () => {
+    const r = await runCli(["ask", "hi"], { OPENCLICKY_OPENAI_KEY: "wrong" });
     expect(r.code).toBe(1);
-    expect(r.stderr).toMatch(/error: backend 401/);
-    const ev = await runCli(["ask", "hi", "--events"], { OPENCLICKY_TOKEN: "wrong" });
+    expect(r.stderr).toMatch(/error: openai 401/);
+    const ev = await runCli(["ask", "hi", "--events"], { OPENCLICKY_OPENAI_KEY: "wrong" });
     expect(ev.code).toBe(1);
     expect(JSON.parse(ev.stdout.trim())).toMatchObject({ type: "error", message: expect.stringContaining("401") });
   });
@@ -180,33 +167,4 @@ describe("openclicky CLI", () => {
     expect(isAlive()).toBe(false);
   });
 
-  describe("token", () => {
-    // `url` is only assigned inside beforeAll, which runs after this describe body, so build the
-    // args fresh per test rather than capturing `url` (still undefined here) in a shared constant.
-    const tokenArgs = () => ["token", "--email", "a@b.com", "--supabase-url", url, "--anon-key", "anon-key"];
-
-    it("--password works but warns to stderr that it is insecure", async () => {
-      const before = signInRequests.length;
-      const r = await runCli([...tokenArgs(), "--password", "hunter2"]);
-      expect(r.code).toBe(0);
-      expect(r.stdout.trim()).toBe("exchanged-session-token");
-      expect(r.stderr).toMatch(/insecure/);
-      expect(signInRequests.slice(before)).toEqual([{ email: "a@b.com", password: "hunter2" }]);
-    });
-
-    it("prefers OPENCLICKY_PASSWORD over prompting, without the insecurity warning", async () => {
-      const before = signInRequests.length;
-      const r = await runCli(tokenArgs(), { OPENCLICKY_PASSWORD: "from-env" });
-      expect(r.code).toBe(0);
-      expect(r.stdout.trim()).toBe("exchanged-session-token");
-      expect(r.stderr).not.toMatch(/insecure/);
-      expect(signInRequests.slice(before)).toEqual([{ email: "a@b.com", password: "from-env" }]);
-    });
-
-    it("fails clearly instead of hanging when there is no flag, no env var, and no TTY to prompt on", async () => {
-      const r = await runCli(tokenArgs());
-      expect(r.code).toBe(1);
-      expect(r.stderr).toMatch(/password required/);
-    });
-  });
 });

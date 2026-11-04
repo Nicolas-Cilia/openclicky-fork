@@ -22,7 +22,7 @@ extension SettingsCatalog {
                 title: "Source code", detail: "Issues and pull requests welcome.",
                 keywords: ["github", "source", "license", "mit", "code"],
                 view: AnyView(SettingsRow(title: "Source code", detail: "Issues and pull requests welcome.") {
-                    Button("GitHub ↗") { openExternalLink("https://github.com/prasanthsasikumar/openclicky") }
+                    Button("GitHub ↗") { openExternalLink("https://github.com/Nicolas-Cilia/openclicky-fork") }
                         .pointerCursor()
                 })),
             SettingsItem(
@@ -33,7 +33,7 @@ extension SettingsCatalog {
                     HStack(spacing: 8) {
                         Button("Show Log") { NSWorkspace.shared.activateFileViewerSelecting([AppLog.fileURL]) }
                             .pointerCursor()
-                        Button("Open Issues ↗") { openExternalLink("https://github.com/prasanthsasikumar/openclicky/issues") }
+                        Button("Open Issues ↗") { openExternalLink("https://github.com/Nicolas-Cilia/openclicky-fork/issues") }
                             .pointerCursor()
                     }
                 })),

@@ -1,8 +1,8 @@
 // Ports SpeechVoices.swift: who speaks the answers. The person picks in Settings → Clicky → Voice
-// from what they have: the free voice on an account, a voice key (OpenAI, ElevenLabs, Google Cloud,
+// from what they have: a voice key (OpenAI, ElevenLabs, Google Cloud,
 // Amazon Polly, Sarvam), Kokoro (an open model downloaded only when picked), or this PC's own voice.
 // Automatic takes the first that can speak, own keys first. Every cloud request goes straight to
-// its vendor from this PC; none of these keys is ever sent to the OpenClicky backend. Request
+// its vendor from this PC. Request
 // building is pure so it is tested without a network (SpeechVoicesTests).
 
 using System.Globalization;
@@ -22,7 +22,6 @@ namespace OpenClicky.Core.Speech;
 public enum SpeechVoiceChoice
 {
     [RawValue("automatic")] Automatic,
-    [RawValue("account")] Account,
     [RawValue("openai")] OpenAI,
     [RawValue("elevenlabs")] ElevenLabs,
     [RawValue("google")] Google,
@@ -48,7 +47,6 @@ public static class SpeechVoiceChoices
     public static string Title(this SpeechVoiceChoice choice) => choice switch
     {
         SpeechVoiceChoice.Automatic => "Automatic",
-        SpeechVoiceChoice.Account => "Free voice (ElevenLabs)",
         SpeechVoiceChoice.OpenAI => "OpenAI",
         SpeechVoiceChoice.ElevenLabs => "ElevenLabs (your key)",
         SpeechVoiceChoice.Google => "Google Cloud",
@@ -60,23 +58,21 @@ public static class SpeechVoiceChoices
     };
 
     /// <summary>
-    /// Automatic's order: own keys first (the person chose to pay for them), then the account's ElevenLabs
-    /// voice (FlowsXR's grant pays for it, with a generous monthly allowance; #23), then Kokoro if someone
+    /// Automatic's order: own keys first (the person chose to pay for them), then Kokoro if someone
     /// downloaded it, then this PC. Gemini comes last of the keys: its voice takes about four seconds a sentence.
     /// </summary>
     public static IReadOnlyList<SpeechVoiceChoice> AutomaticOrder { get; } =
     [
         SpeechVoiceChoice.OpenAI, SpeechVoiceChoice.ElevenLabs, SpeechVoiceChoice.Google, SpeechVoiceChoice.Polly,
-        SpeechVoiceChoice.Sarvam, SpeechVoiceChoice.Gemini, SpeechVoiceChoice.Account, SpeechVoiceChoice.Kokoro, SpeechVoiceChoice.Mac,
+        SpeechVoiceChoice.Sarvam, SpeechVoiceChoice.Gemini, SpeechVoiceChoice.Kokoro, SpeechVoiceChoice.Mac,
     ];
 
     private static bool Has(string? key) => !string.IsNullOrWhiteSpace(key);
 
     /// <summary>Whether this voice can speak right now in <paramref name="languageCode"/> with these settings.</summary>
-    public static bool CanSpeak(SpeechVoiceChoice choice, OpenClickyShellSettings settings, bool hasAccount, bool kokoroInstalled, string languageCode) => choice switch
+    public static bool CanSpeak(SpeechVoiceChoice choice, OpenClickyShellSettings settings, bool kokoroInstalled, string languageCode) => choice switch
     {
         SpeechVoiceChoice.Automatic => false,
-        SpeechVoiceChoice.Account => hasAccount,
         SpeechVoiceChoice.OpenAI => Has(settings.OpenaiApiKey),
         SpeechVoiceChoice.ElevenLabs => Has(settings.ElevenLabsApiKey),
         SpeechVoiceChoice.Google => Has(settings.GoogleCloudApiKey),
@@ -88,57 +84,45 @@ public static class SpeechVoiceChoices
     };
 
     /// <summary>
-    /// The voices the picker offers: Automatic, every voice there is a key or account for, Kokoro
+    /// The voices the picker offers: Automatic, every voice there is a key for, Kokoro
     /// (picking it downloads it), and this PC. The one already picked stays listed even if its key
     /// went, so the picker never shows a blank.
     /// </summary>
-    public static IReadOnlyList<SpeechVoiceChoice> Offered(OpenClickyShellSettings settings, bool hasAccount, string languageCode)
+    public static IReadOnlyList<SpeechVoiceChoice> Offered(OpenClickyShellSettings settings, string languageCode)
     {
         var picked = FromStored(settings.SpeechVoice);
         return AllCases.Where(choice => choice switch
         {
             SpeechVoiceChoice.Automatic or SpeechVoiceChoice.Mac => true,
             SpeechVoiceChoice.Kokoro => choice == picked || KokoroVoice.SpeakerFor(languageCode, null) is not null,
-            _ => choice == picked || CanSpeak(choice, settings, hasAccount, kokoroInstalled: false, languageCode),
+            _ => choice == picked || CanSpeak(choice, settings, kokoroInstalled: false, languageCode),
         }).ToList();
     }
 
     /// <summary>
-    /// The voice that speaks now: the one picked if it can, else the account's free voice, else this
-    /// PC's (a missing key or a Kokoro still downloading: this PC's voice sounds robotic next to the
-    /// free one, 2026-10-28); Automatic, the first in <see cref="AutomaticOrder"/> that can. Kokoro in a
-    /// language it doesn't speak (it became the voice on its own, then the language changed) goes
-    /// on as Automatic. While the account voice rests (<see cref="AccountVoiceRest"/>: two slow or failed
-    /// answers in a row) Automatic passes it by; a voice picked by hand is never passed by.
+    /// The voice that speaks now: the one picked if it can, else this PC's (a missing key or a Kokoro
+    /// still downloading); Automatic, the first in <see cref="AutomaticOrder"/> that can. Kokoro in a
+    /// language it doesn't speak (it became the voice on its own, then the language changed) goes on
+    /// as Automatic.
     /// </summary>
-    public static SpeechVoiceChoice Resolve(OpenClickyShellSettings settings, bool hasAccount, bool kokoroInstalled, string languageCode,
-                                            bool accountVoiceIsResting = false)
+    public static SpeechVoiceChoice Resolve(OpenClickyShellSettings settings, bool kokoroInstalled, string languageCode)
     {
         var picked = FromStored(settings.SpeechVoice);
         var kokoroCantSpeakLanguage = picked == SpeechVoiceChoice.Kokoro && KokoroVoice.SpeakerFor(languageCode, null) is null;
-        var automaticCandidates = accountVoiceIsResting ? AutomaticOrder.Where(choice => choice != SpeechVoiceChoice.Account).ToList() : AutomaticOrder;
         IReadOnlyList<SpeechVoiceChoice> candidates = picked == SpeechVoiceChoice.Automatic || kokoroCantSpeakLanguage
-            ? automaticCandidates
-            : [picked, SpeechVoiceChoice.Account];
+            ? AutomaticOrder
+            : [picked];
         foreach (var candidate in candidates)
         {
-            if (CanSpeak(candidate, settings, hasAccount, kokoroInstalled, languageCode)) return candidate;
+            if (CanSpeak(candidate, settings, kokoroInstalled, languageCode)) return candidate;
         }
         return SpeechVoiceChoice.Mac;
     }
 
     /// <summary><see cref="Resolve"/> with this PC's settings.</summary>
     public static SpeechVoiceChoice Current(SpeechVoiceServices? services = null) =>
-        Resolve(OpenClickyConfiguration.Settings, OpenClickyConfiguration.HasAccountToken,
-                (services ?? SpeechVoiceServices.Current)?.KokoroIsInstalled() ?? false, ReplyLanguage.CurrentCode,
-                AccountVoiceRest.IsResting);
+        Resolve(OpenClickyConfiguration.Settings, (services ?? SpeechVoiceServices.Current)?.KokoroIsInstalled() ?? false, ReplyLanguage.CurrentCode);
 
-    /// <summary>The voice that takes over when the account voice is late or fails: Kokoro when it is downloaded and speaks
-    /// the language (offline, under a second a sentence once loaded), else this PC.</summary>
-    public static SpeechVoiceChoice FastestLocalVoice(bool kokoroInstalled, string languageCode) =>
-        CanSpeak(SpeechVoiceChoice.Kokoro, new OpenClickyShellSettings(), hasAccount: false, kokoroInstalled, languageCode)
-            ? SpeechVoiceChoice.Kokoro
-            : SpeechVoiceChoice.Mac;
 }
 
 /// <summary>
@@ -259,8 +243,7 @@ public static class CloudVoiceRequests
         return request;
     }
 
-    /// <summary>The ElevenLabs text-to-speech body, for an own key here and for the account's free voice
-    /// (the backend's /tts relays it to ElevenLabs), so both ask for the same model and settings.</summary>
+    /// <summary>The ElevenLabs text-to-speech body, for an own key.</summary>
     public static byte[] ElevenLabsSpeechBody(string text) => Encoding.UTF8.GetBytes(new JsonObject
     {
         ["text"] = text,
@@ -419,7 +402,7 @@ public sealed class CloudVoiceException : Exception
         Status = status;
     }
 
-    public static CloudVoiceException NoKey(string vendor) => new(CloudVoiceFailure.NoKey, vendor, $"{vendor} needs a key under Settings → Keys & Account.");
+    public static CloudVoiceException NoKey(string vendor) => new(CloudVoiceFailure.NoKey, vendor, $"{vendor} needs a key under Settings → Keys & Plans.");
 
     public static CloudVoiceException Refused(string vendor, int status, string message) =>
         new(CloudVoiceFailure.Refused, vendor, $"{vendor} refused ({status}): {message}", status);
@@ -429,8 +412,7 @@ public sealed class CloudVoiceException : Exception
 
 // MARK: - Speaking
 
-/// <summary>The audio for one piece of an answer in a voice that needs no account (the account's voice goes
-/// through the backend, in AnswerVoicePlayer). Shared by the answers and the keys' Test buttons.</summary>
+/// <summary>The audio for one piece of an answer. Shared by the answers and the keys' Test buttons.</summary>
 public static class CloudVoiceSpeaker
 {
     public static async Task<byte[]> AudioAsync(

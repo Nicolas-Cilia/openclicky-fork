@@ -4,8 +4,7 @@
 //
 //  "Play Blinding Lights" in Spotify's desktop app. Spotify plays a track by URI but offers no
 //  search of its own, so the song is looked up first: on the person's own Spotify client
-//  credentials straight to Spotify, else through the OpenClicky backend's catalogue search (the
-//  words only), and when neither answers, Spotify's own search page opens for them to pick.
+//  credentials straight to Spotify, and without them Spotify's own search page opens for them to pick.
 //
 
 import AppKit
@@ -19,23 +18,20 @@ nonisolated struct MusicTrack: Equatable {
 
 nonisolated enum MusicLookupRoute: Equatable {
     case spotify(clientId: String, clientSecret: String)
-    case backend(URL)
     case none
 
-    /// Own credentials ("clientId:clientSecret" in shell.json) first; else the backend.
-    static func route(credentials: String?, backendURL: URL?) -> MusicLookupRoute {
+    /// Own credentials ("clientId:clientSecret" in shell.json), else no lookup.
+    static func route(credentials: String?) -> MusicLookupRoute {
         if let credentials {
             let parts = credentials.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ":", maxSplits: 1).map(String.init)
             if parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty { return .spotify(clientId: parts[0], clientSecret: parts[1]) }
         }
-        if let backendURL { return .backend(backendURL) }
         return .none
     }
 
     var logName: String {
         switch self {
         case .spotify: return "spotify"
-        case .backend: return "backend"
         case .none: return "none"
         }
     }
@@ -97,10 +93,6 @@ nonisolated struct MusicLookup {
                 var request = URLRequest(url: components.url!, timeoutInterval: Self.requestTimeout)
                 request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
                 return try Self.decodeSpotifyResults(try await data(for: request))
-            case .backend(let backendURL):
-                var components = URLComponents(url: backendURL.appendingPathComponent("music/search"), resolvingAgainstBaseURL: false)!
-                components.queryItems = [URLQueryItem(name: "q", value: query)]
-                return try Self.decodeBackendResults(try await data(for: URLRequest(url: components.url!, timeoutInterval: Self.requestTimeout)))
             case .none:
                 return []
             }
@@ -129,13 +121,6 @@ nonisolated struct MusicLookup {
             throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: "status \(status)"])
         }
         return data
-    }
-
-    /// The backend's `{tracks:[{uri,name,artists:[String],…}]}`.
-    static func decodeBackendResults(_ data: Data) throws -> [MusicTrack] {
-        struct Reply: Decodable { let tracks: [Track] }
-        struct Track: Decodable { let uri: String; let name: String; let artists: [String] }
-        return try JSONDecoder().decode(Reply.self, from: data).tracks.map { MusicTrack(uri: $0.uri, name: $0.name, artists: $0.artists) }
     }
 
     /// Spotify's own `{tracks:{items:[{uri,name,artists:[{name}],…}]}}`.

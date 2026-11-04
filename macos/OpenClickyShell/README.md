@@ -18,8 +18,6 @@ Settings live in `~/.openclicky/shell.json` (created via the menu → Open Setti
 ```json
 {
   "cliCommand": ["node", "/path/to/openclicky/agent/dist/cli.js"],
-  "backendUrl": "http://localhost:8787",
-  "token": "<supabase jwt or session token>",
   "workspace": "/Users/you/OpenClicky",
   "model": "",
   "voiceSeconds": 5

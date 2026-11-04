@@ -174,7 +174,6 @@ public sealed partial class IslandModel : ObservableObject
         PermissionOffersTrustReset: PermissionPrompt?.OffersAccessibilityTrustReset == true,
         TourHasStatus: TourCard?.Status is not null,
         TourHasMicrophoneName: TourCard?.MicrophoneName is not null,
-        TourHasField: TourCard?.Field is not null,
         SlotHeight: SlotHeight,
         SlotWidth: SlotWidth,
         PeekGrowsSideways: PeekDirection == IslandPeekDirection.Sideways);
@@ -414,7 +413,7 @@ public sealed partial class IslandModel : ObservableObject
             _ = EndGracefulSettleAsync();
         }
         var sizeChanged = TourCard?.Status != card?.Status || TourCard?.Step != card?.Step
-            || TourCard?.MicrophoneName != card?.MicrophoneName || TourCard?.Field != card?.Field;
+            || TourCard?.MicrophoneName != card?.MicrophoneName;
         TourCard = card;
         Reconcile(immediately: true);
         if (sizeChanged && Expansion == IslandExpansion.Tour) LayoutChanged?.Invoke();
@@ -480,7 +479,6 @@ public enum IslandSettingsDestination
     General,
     Dictation,
     Keys,
-    Account,
 }
 
 /// <summary>What every monitor's island shows and shares, and the island's buttons for the orchestrator to act on.</summary>
@@ -496,7 +494,7 @@ public sealed partial class IslandCompanionModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsBusy), nameof(CompactStatusText), nameof(DetailLine), nameof(IsQuestionOnItsWay))]
     private string? agentActivityText;
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(DetailLine))] private string? lastTranscript;
-    /// <summary>Who is answering ("Claude Code", "free credits").</summary>
+    /// <summary>Who is answering ("Claude Code", "Codex").</summary>
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(CompactStatusText))] private string? answeringSourceName;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CompactStatusText), nameof(ShortcutGrid))]
@@ -528,8 +526,6 @@ public sealed partial class IslandCompanionModel : ObservableObject
     [ObservableProperty] private AppConnectPrompt? connectPrompt;
     [ObservableProperty] private PermissionPrompt? permissionPrompt;
     [ObservableProperty] private FirstRunTourCard? tourCard;
-    /// <summary>What is typed in the tour's account field.</summary>
-    [ObservableProperty] private string tourFieldText = "";
     /// <summary>The caption typed into every island's compact strip; null = none.</summary>
     [ObservableProperty] private string? captionText;
     [ObservableProperty] private bool isSayingGoodbye;
@@ -571,7 +567,6 @@ public sealed partial class IslandCompanionModel : ObservableObject
     public event Action? CloseComposerRequested;
     public event Action? OpenPanelRequested;
     public event Action? DismissPanelsRequested;
-    public event Action? FocusTourFieldRequested;
     public event Action<HUDPlacement>? PlacementChangeRequested;
 
     /// <summary>Ctrl tapped twice: the one-line composer on the island under the pointer, with the keyboard.</summary>
@@ -590,8 +585,6 @@ public sealed partial class IslandCompanionModel : ObservableObject
     public void OpenPanel() => OpenPanelRequested?.Invoke();
     /// <summary>Closes every open panel because a window it opened is coming forward.</summary>
     public void DismissPanels() => DismissPanelsRequested?.Invoke();
-    /// <summary>Gives the keyboard to the tour card's field (the account step's email or code).</summary>
-    public void FocusTourField() => FocusTourFieldRequested?.Invoke();
 
     public void SetPlacement(HUDPlacement newPlacement)
     {
@@ -652,7 +645,6 @@ public sealed partial class IslandCompanionModel : ObservableObject
     [RelayCommand] private void TourPrimary() => TourPrimaryRequested?.Invoke();
     [RelayCommand] private void TourSecondary() => TourSecondaryRequested?.Invoke();
     [RelayCommand] private void TourChangeMicrophone() => TourChangeMicrophoneRequested?.Invoke();
-    [RelayCommand] private void SubmitTourField() => TourFieldSubmitted?.Invoke(TourFieldText);
 
     // MARK: - The caption typed into the compact strip
 

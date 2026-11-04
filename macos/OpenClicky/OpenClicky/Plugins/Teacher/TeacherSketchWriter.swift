@@ -11,8 +11,7 @@
 //  It also writes the lessons the app starts itself (`TeacherPlugin.startLesson`), so it has to
 //  work without OpenAI too, since most people have no key: an Anthropic key gets Claude Sonnet 5.5
 //  with thinking off (3-4 s and the clearest drawings of those measured; Haiku 4.5 overlapped
-//  its labels), a free account gets the backend's /chat (Sonnet 5.5 there, thinking off once the
-//  backend keeps that setting), and another API key its own provider. Plans (the Claude Code and
+//  its labels), and another API key its own provider. Plans (the Claude Code and
 //  Codex apps) take 15 s or more to start, so they never start a lesson early.
 //
 
@@ -21,15 +20,13 @@ import Foundation
 enum TeacherSketchWriter {
     static let openAIModel = "gpt-5.5"
     static let anthropicModel = "claude-sonnet-5-5"
-    /// The output a lesson needs: 25 commands is 400-700 tokens. The backend caps an account at this.
+    /// The output a lesson needs: 25 commands is 400-700 tokens.
     static let maximumOutputTokens = 1024
 
     /// Where a lesson is written, best first.
     enum Route: Equatable {
         case openAI(key: String)
         case anthropic(key: String)
-        /// The free account: the backend's /chat on the account token.
-        case account
         /// Another API key the ask lane answers with (OpenRouter, Gemini, Groq, Mistral, xAI).
         case answerSource(AnswerSource)
     }
@@ -38,8 +35,7 @@ enum TeacherSketchWriter {
     static func route(for credentials: ProviderCredentials) -> Route? {
         if let openAIKey = credentials.openAIKey { return .openAI(key: openAIKey) }
         if let anthropicKey = credentials.anthropicKey { return .anthropic(key: anthropicKey) }
-        if credentials.accountToken != nil { return .account }
-        let fastSources = credentials.answerSourcesInOrder.filter { ![.claudeCodePlan, .codexPlan, .openClickyAccount, .anthropic, .openAI].contains($0) }
+        let fastSources = credentials.answerSourcesInOrder.filter { ![.claudeCodePlan, .codexPlan, .anthropic, .openAI].contains($0) }
         return fastSources.first.map(Route.answerSource)
     }
     static let timeoutSeconds: TimeInterval = 20
@@ -103,22 +99,12 @@ enum TeacherSketchWriter {
         case .openAI(let key)?:
             reply = await writeWithOpenAI(key: key, userPrompt: userPrompt, screenshotJPEG: screenshotJPEG)
         case .anthropic(let key)?:
-            reply = await writeWithClaude(request: DirectProviderRequests.anthropicMessages(key: key), goesToBackend: false,
+            reply = await writeWithClaude(request: DirectProviderRequests.anthropicMessages(key: key),
                                           userPrompt: userPrompt, screenshotJPEG: screenshotJPEG)
-        case .account?:
-            if let chatURL = URL(string: "\(OpenClickyConfiguration.backendBaseURL)/chat") {
-                var request = URLRequest(url: chatURL)
-                request.httpMethod = "POST"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                OpenClickyConfiguration.authorize(&request)
-                reply = await writeWithClaude(request: request, goesToBackend: true, userPrompt: userPrompt, screenshotJPEG: screenshotJPEG)
-            } else {
-                reply = nil
-            }
         case .answerSource?, nil:
             // ClaudeAPI hands these to the source's AnswerProvider (1,024 tokens); a plan is slow but
             // still draws what the Realtime lane described.
-            let answers = ClaudeAPI(currentProxyURL: { "\(OpenClickyConfiguration.backendBaseURL)/chat" })
+            let answers = ClaudeAPI()
             let images = screenshotJPEG.map { [(data: $0, label: "the student's screen")] } ?? []
             reply = try? await answers.analyzeImage(images: images, systemPrompt: systemPrompt, userPrompt: userPrompt).text
         }
@@ -130,7 +116,6 @@ enum TeacherSketchWriter {
         switch route {
         case .openAI?: return "openai \(openAIModel)"
         case .anthropic?: return "anthropic \(anthropicModel)"
-        case .account?: return "the account"
         case .answerSource(let source)?: return source.rawValue
         case nil: return "the answer source"
         }
@@ -138,7 +123,6 @@ enum TeacherSketchWriter {
 
     /// The Messages body for a lesson. Thinking is turned off: Sonnet 5.5 thinks by default and
     /// spent the whole budget before writing a stroke (it takes "between_tools", not "disabled").
-    /// On the account the backend picks the model and maps this to what that model accepts.
     static func claudeBody(userPrompt: String, screenshotJPEG: Data?) -> [String: Any] {
         var content: [[String: Any]] = []
         if let screenshotJPEG {
@@ -154,18 +138,11 @@ enum TeacherSketchWriter {
         ]
     }
 
-    private static func writeWithClaude(request: URLRequest, goesToBackend: Bool, userPrompt: String, screenshotJPEG: Data?) async -> String? {
+    private static func writeWithClaude(request: URLRequest, userPrompt: String, screenshotJPEG: Data?) async -> String? {
         var request = request
         request.timeoutInterval = timeoutSeconds
         request.httpBody = try? JSONSerialization.data(withJSONObject: claudeBody(userPrompt: userPrompt, screenshotJPEG: screenshotJPEG))
-        let session = URLSession.shared
-        let answer: (Data, URLResponse)?
-        if goesToBackend {
-            answer = try? await BackendSignIn.send(request) { try await session.data(for: $0) }
-        } else {
-            answer = try? await session.data(for: request)
-        }
-        guard let (data, response) = answer else { return nil }
+        guard let (data, response) = try? await URLSession.shared.data(for: request) else { return nil }
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             AppLog.append("teacher: sketch writer refused (\((response as? HTTPURLResponse)?.statusCode ?? 0))")
             return nil

@@ -237,7 +237,7 @@ nonisolated struct OpenAIChatAnswerProvider: AnswerProvider {
         if source == .openRouter {
             // OpenRouter's app attribution: optional, but it is how the requests show up as
             // OpenClicky's on their side instead of as an unnamed client.
-            urlRequest.setValue("https://github.com/prasanthsasikumar/openclicky", forHTTPHeaderField: "HTTP-Referer")
+            urlRequest.setValue("https://github.com/Nicolas-Cilia/openclicky-fork", forHTTPHeaderField: "HTTP-Referer")
             urlRequest.setValue("OpenClicky", forHTTPHeaderField: "X-Title")
         }
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: makeRequestBody(source: source, model: model, answerRequest: answerRequest))

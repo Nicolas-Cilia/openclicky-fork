@@ -40,21 +40,21 @@ export function heuristicLane(text: string): Lane {
 
 export async function gate(cfg: AgentConfig, text: string, opts: { fetchImpl?: typeof fetch } = {}): Promise<GateDecision> {
   const f = opts.fetchImpl ?? fetch;
-  // Claude decides the lane: the person's Anthropic key straight to Anthropic, else the backend on their token.
-  const route = anthropicRoute(cfg, "/v1/messages", { "content-type": "application/json" });
-  if (!route) return { lane: heuristicLane(text), reason: "no anthropic key or token; heuristic", gated: false };
+  // Claude decides the lane when the person has an Anthropic key; otherwise the local heuristic does.
+  const route = anthropicRoute(cfg, { "content-type": "application/json" });
+  if (!route) return { lane: heuristicLane(text), reason: "no anthropic key; heuristic", gated: false };
   try {
     const res = await f(route.url, {
       method: "POST",
       headers: route.headers,
       body: JSON.stringify({
-        model: route.direct ? DIRECT_DEFAULTS.anthropicModel : "default",
+        model: DIRECT_DEFAULTS.anthropicModel,
         max_tokens: 80,
         system: GATE_SYSTEM_PROMPT,
         messages: [{ role: "user", content: text }],
       }),
     });
-    if (!res.ok) return { lane: heuristicLane(text), reason: `gate unavailable (${route.direct ? "anthropic" : "backend"} ${res.status}); heuristic`, gated: false };
+    if (!res.ok) return { lane: heuristicLane(text), reason: `gate unavailable (anthropic ${res.status}); heuristic`, gated: false };
     const json: any = await res.json();
     const reply = (json.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
     const parsed = parseGateReply(reply);

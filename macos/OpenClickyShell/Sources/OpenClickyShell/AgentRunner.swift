@@ -31,8 +31,7 @@ final class AgentRunner: ObservableObject {
 
     init(settings: ShellSettings) {
         self.settings = settings
-        appendSystem("OpenClicky shell ready. Backend \(settings.backendUrl). Workspace \(settings.workspace).")
-        if settings.token.isEmpty { appendSystem("No token configured — set \"token\" in ~/.openclicky/shell.json (see README: Auth flow).") }
+        appendSystem("OpenClicky shell ready. Workspace \(settings.workspace).")
     }
 
     /// Plain-text rendering of the timeline (used by --smoke-run and for copy/paste).

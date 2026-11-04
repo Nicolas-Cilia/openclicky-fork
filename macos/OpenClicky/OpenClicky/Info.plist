@@ -21,12 +21,10 @@
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>
-	<string>https://github.com/prasanthsasikumar/openclicky/releases/latest/download/appcast.xml</string>
+	<string>https://github.com/Nicolas-Cilia/openclicky-fork/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>Dgr1iPs5GdoIt9pHsGJ3Kl/89sd8FPW/LalSsQTmKec=</string>
+	<string>D5930xRV1/cUbOuCmyzFFfuUJ91JCKoyAEDXpWl7jXQ=</string>
 	<key>SUScheduledCheckInterval</key>
 	<integer>86400</integer>
-	<key>VoiceTranscriptionProvider</key>
-	<string>assemblyai</string>
 </dict>
 </plist>

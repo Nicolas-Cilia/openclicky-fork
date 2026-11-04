@@ -27,18 +27,15 @@ struct SpeechVoicesTests {
         #expect(SpeechVoiceChoice.polly.storedValue == "polly")
     }
 
-    @Test func automaticPrefersOwnKeysThenTheFreeVoiceThenOfflineVoices() {
-        func resolve(_ shell: OpenClickyShellSettings, account: Bool = false, kokoro: Bool = false) -> SpeechVoiceChoice {
-            SpeechVoiceChoice.resolve(settings: shell, hasAccount: account, kokoroInstalled: kokoro, languageCode: "en")
+    @Test func automaticPrefersOwnKeysThenOfflineVoices() {
+        func resolve(_ shell: OpenClickyShellSettings, kokoro: Bool = false) -> SpeechVoiceChoice {
+            SpeechVoiceChoice.resolve(settings: shell, kokoroInstalled: kokoro, languageCode: "en")
         }
         #expect(resolve(settings()) == .mac)
         #expect(resolve(settings(), kokoro: true) == .kokoro)
-        // The account's ElevenLabs voice comes before Kokoro, even once Kokoro is downloaded.
-        #expect(resolve(settings(), account: true, kokoro: true) == .account)
-        #expect(resolve(settings(), account: true) == .account)
-        #expect(resolve(settings { $0.sarvamKey = "s" }, account: true) == .sarvam)
+        #expect(resolve(settings { $0.sarvamKey = "s" }) == .sarvam)
         #expect(resolve(settings { $0.geminiApiKey = "g"; $0.sarvamKey = "s" }) == .sarvam)
-        #expect(resolve(settings { $0.geminiApiKey = "g" }, account: true) == .gemini)
+        #expect(resolve(settings { $0.geminiApiKey = "g" }) == .gemini)
         #expect(resolve(settings { $0.elevenLabsApiKey = "e"; $0.sarvamKey = "s" }) == .elevenLabs)
         #expect(resolve(settings { $0.openaiApiKey = "o"; $0.elevenLabsApiKey = "e" }) == .openAI)
         #expect(resolve(settings { $0.amazonPollyCredentials = "AKIA:secret" }) == .polly)
@@ -46,28 +43,28 @@ struct SpeechVoicesTests {
 
     @Test func aPickedVoiceThatCannotSpeakFallsBackToThisMac() {
         let pickedGoogle = settings { $0.speechVoice = "google" }
-        #expect(SpeechVoiceChoice.resolve(settings: pickedGoogle, hasAccount: true, kokoroInstalled: false, languageCode: "en") == .mac)
+        #expect(SpeechVoiceChoice.resolve(settings: pickedGoogle, kokoroInstalled: false, languageCode: "en") == .mac)
         let pickedKokoro = settings { $0.speechVoice = "kokoro" }
-        #expect(SpeechVoiceChoice.resolve(settings: pickedKokoro, hasAccount: false, kokoroInstalled: false, languageCode: "en") == .mac)
-        #expect(SpeechVoiceChoice.resolve(settings: pickedKokoro, hasAccount: false, kokoroInstalled: true, languageCode: "en") == .kokoro)
+        #expect(SpeechVoiceChoice.resolve(settings: pickedKokoro, kokoroInstalled: false, languageCode: "en") == .mac)
+        #expect(SpeechVoiceChoice.resolve(settings: pickedKokoro, kokoroInstalled: true, languageCode: "en") == .kokoro)
         // Kokoro doesn't speak Tamil; Sarvam does.
-        #expect(SpeechVoiceChoice.resolve(settings: pickedKokoro, hasAccount: false, kokoroInstalled: true, languageCode: "ta") == .mac)
+        #expect(SpeechVoiceChoice.resolve(settings: pickedKokoro, kokoroInstalled: true, languageCode: "ta") == .mac)
         let pickedSarvam = settings { $0.speechVoice = "sarvam"; $0.sarvamKey = "s" }
-        #expect(SpeechVoiceChoice.resolve(settings: pickedSarvam, hasAccount: false, kokoroInstalled: false, languageCode: "ta") == .sarvam)
+        #expect(SpeechVoiceChoice.resolve(settings: pickedSarvam, kokoroInstalled: false, languageCode: "ta") == .sarvam)
     }
 
 
     @Test func kokoroInALanguageItDoesntSpeakCarriesOnAsAutomatic() {
         let kokoro = settings { $0.speechVoice = "kokoro" }
-        #expect(SpeechVoiceChoice.resolve(settings: kokoro, hasAccount: true, kokoroInstalled: true, languageCode: "ta") == .account)
+        #expect(SpeechVoiceChoice.resolve(settings: kokoro, kokoroInstalled: true, languageCode: "ta") == .mac)
     }
 
     @Test func thePickerOffersTheVoicesThereAreKeysForAndKeepsThePickedOne() {
-        let bare = SpeechVoiceChoice.offered(settings: settings(), hasAccount: false, languageCode: "en")
+        let bare = SpeechVoiceChoice.offered(settings: settings(), languageCode: "en")
         #expect(bare == [.automatic, .kokoro, .mac])
-        let withKeys = SpeechVoiceChoice.offered(settings: settings { $0.elevenLabsApiKey = "e"; $0.googleCloudApiKey = "g" }, hasAccount: true, languageCode: "en")
-        #expect(withKeys == [.automatic, .account, .elevenLabs, .google, .kokoro, .mac])
-        let pickedWithoutKey = SpeechVoiceChoice.offered(settings: settings { $0.speechVoice = "polly" }, hasAccount: false, languageCode: "en")
+        let withKeys = SpeechVoiceChoice.offered(settings: settings { $0.elevenLabsApiKey = "e"; $0.googleCloudApiKey = "g" }, languageCode: "en")
+        #expect(withKeys == [.automatic, .elevenLabs, .google, .kokoro, .mac])
+        let pickedWithoutKey = SpeechVoiceChoice.offered(settings: settings { $0.speechVoice = "polly" }, languageCode: "en")
         #expect(pickedWithoutKey.contains(.polly))
     }
 
@@ -115,9 +112,8 @@ struct SpeechVoicesTests {
         #expect(try CloudVoiceRequests.decodeGoogleSpeech(answer) == audio)
     }
 
-    // The account's free voice (/tts, relayed to ElevenLabs) and an own ElevenLabs key ask for the
-    // same model and settings, from one body builder.
-    @Test func theFreeVoiceAndAnOwnElevenLabsKeySendTheSameBody() throws {
+    // An own ElevenLabs key's speech body.
+    @Test func anOwnElevenLabsKeySendsTheExpectedBody() throws {
         let body = try #require(try JSONSerialization.jsonObject(with: CloudVoiceRequests.elevenLabsSpeechBody(text: "hi")) as? [String: Any])
         #expect(body["text"] as? String == "hi")
         #expect(body["model_id"] as? String == "eleven_flash_v2_5")

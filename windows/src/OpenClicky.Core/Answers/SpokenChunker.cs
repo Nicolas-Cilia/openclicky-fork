@@ -8,8 +8,7 @@
 //
 // A sentence ends at ". " "! " "? ", at a new line, and at the danda (। ॥) and the CJK stops
 // (。！？) with or without a space after them. No piece is longer than `maximumPieceLength` UTF-16
-// units: the backend's /tts speaks at most 400 (a JavaScript length) and silently drops the rest,
-// so a long sentence is cut at a space or comma instead.
+// units, so a long sentence is cut at a space or comma instead.
 //
 // The [POINT:…] tag is never spoken. The ask prompt puts it first, so the chunker holds the text
 // back until the tag is complete and records it in `PointTag`; a tag at the end is found when the

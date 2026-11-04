@@ -17,13 +17,13 @@ public sealed class SettingsCatalog
 {
     private readonly DictationSettings settings;
     private readonly Func<OpenClickyShellSettings> shellSettings;
-    private readonly Func<AccountCapabilities> capabilities;
+    private readonly Func<ProviderCapabilities> capabilities;
 
-    public SettingsCatalog(DictationSettings settings, Func<OpenClickyShellSettings>? shellSettings = null, Func<AccountCapabilities>? capabilities = null)
+    public SettingsCatalog(DictationSettings settings, Func<OpenClickyShellSettings>? shellSettings = null, Func<ProviderCapabilities>? capabilities = null)
     {
         this.settings = settings;
         this.shellSettings = shellSettings ?? (() => OpenClickyConfiguration.Settings);
-        this.capabilities = capabilities ?? (() => AccountCapabilities.Current());
+        this.capabilities = capabilities ?? (() => ProviderCapabilities.Current());
     }
 
     /// <summary>Every row, placed and ordered by <see cref="SettingsLayout"/>, then the search-only ways to your own pages.</summary>
@@ -34,7 +34,7 @@ public sealed class SettingsCatalog
     private IReadOnlyList<SettingsItem> UnplacedItems() =>
     [
         .. DictationItems(), .. KeyboardItems(), .. OrbItems(), .. ClickyItems(), .. VoiceItems(), .. PluginsItems(), .. IslandItems(),
-        .. AccountItems(), .. KeysItems(), .. PrivacyItems(), .. GeneralItems(), .. AboutItems(), .. NavigationItems(),
+        .. KeysItems(), .. PrivacyItems(), .. GeneralItems(), .. AboutItems(), .. NavigationItems(),
     ];
 
     /// <summary>The items that apply now.</summary>
@@ -214,8 +214,10 @@ public sealed class SettingsCatalog
         };
         return
         [
-            Item("clicky.answerSource", "Answers come from", "Automatic uses your own keys first, then plans you switched on, then the free credits.",
+            Item("clicky.answerSource", "Answers come from", "Your default. Automatic uses a linked plan first, then your own keys.",
                 ["provider", "model", "openai", "anthropic", "claude", "openrouter", "gemini", "groq", "mistral", "grok", "codex", "subscription", "plan", "answers"]),
+            Item("clicky.backupSource", "When it runs out", "Which plan takes over when your default plan hits its limit.",
+                ["backup", "fallback", "failover", "limit", "credits", "ran out", "codex", "claude", "plan", "subscription"]),
             Item("clicky.model", "Claude model", "When Claude answers: Sonnet is quicker, Opus thinks harder.",
                 ["model", "claude", "sonnet", "opus", "smarter", "quicker"]),
             Item("clicky.pointer", "Show the pointer", "It flies to what Clicky means.",
@@ -247,7 +249,7 @@ public sealed class SettingsCatalog
                 ["language", "english", "hindi", "tamil", "spanish", "french", "speak", "reply", "listen"]),
             Item("clicky.speechVoice", "Voice", "Voice", "Who speaks the answers: the cloud voice, or this PC’s own voice, free and offline.",
                 ["voice", "speech", "tts", "text to speech", "elevenlabs", "eleven labs", "kokoro", "offline", "on device",
-                 "pc voice", "windows voice", "narrator", "credits", "allowance", "left"]),
+                 "pc voice", "windows voice", "narrator", "credits", "left"]),
         ];
         // Fast voice runs on OpenAI Realtime or Gemini Live, which need an own OpenAI or Gemini key; without one
         // its switch would do nothing, so the row shows the way to a key instead.
@@ -267,7 +269,7 @@ public sealed class SettingsCatalog
         {
             // Only worth a choice when both can run here.
             var credentials = ProviderCredentials.FromSettings(shellSettings());
-            if (credentials.GeminiKey is not null && (credentials.OpenAIKey is not null || credentials.AccountToken is not null))
+            if (credentials.GeminiKey is not null && credentials.OpenAIKey is not null)
             {
                 items.Add(Item("clicky.realtimeProvider", "Fast voice", "Fast voice with", RealtimeProviderDetail,
                     ["realtime", "gemini", "openai", "live", "provider", "fast voice", "hands-free"]));
@@ -437,13 +439,13 @@ public sealed class SettingsCatalog
         ];
     }
 
-    // MARK: - Keys & Account, Account (SettingsAccountPage.swift)
+    // MARK: - Keys & Plans (SettingsKeysPage.swift)
 
     public IReadOnlyList<SettingsItem> KeysItems() =>
     [
         new()
         {
-            Id = "account.keys", Section = "Your keys",
+            Id = "keys.list", Section = "Your keys",
             Title = "Your keys", Detail = "Keys from AI providers (they answer, clean up and speak) and voice services.",
             Keywords = ["api key", "byok", "own key", "provider", "add key", "openai", "openaiApiKey", "anthropic", "claude",
                         "anthropicApiKey", "openrouter", "llama", "deepseek", "gemini", "google", "ai studio", "groq",
@@ -451,54 +453,49 @@ public sealed class SettingsCatalog
         },
         new()
         {
-            Id = "account.keysNote", Section = "Your keys", Chrome = SettingsItemChrome.Footer,
+            Id = "keys.keysNote", Section = "Your keys", Chrome = SettingsItemChrome.Footer,
             Title = "Where keys go", Detail = KeysNoteText, Keywords = ["shell.json", "byok"],
         },
         new()
         {
-            Id = "account.claudeCodePlan", Section = "Subscriptions",
+            Id = "keys.claudeCodePlan", Section = "Subscriptions",
             Title = "Claude Code (your Claude plan)", Detail = "Answer questions through Claude Code, signed in to your Claude plan.",
             Keywords = ["claude code", "claude plan", "pro", "max", "subscription", "anthropic"],
         },
         new()
         {
-            Id = "account.codexPlan", Section = "Subscriptions",
+            Id = "keys.codexPlan", Section = "Subscriptions",
             Title = "Codex (your ChatGPT plan)", Detail = "Answer questions through Codex, signed in with ChatGPT.",
             Keywords = ["codex", "chatgpt", "plus", "pro", "subscription", "openai"],
         },
         new()
         {
-            Id = "account.plansNote", Section = "Subscriptions", Chrome = SettingsItemChrome.Footer,
+            Id = "keys.usage.claudeCodePlan", Section = "Subscriptions",
+            Title = "Claude Code usage", Detail = "What OpenClicky has used on your Claude plan, and how full its limits are.",
+            Keywords = ["usage", "credits", "tracker", "limit", "tokens", "claude", "plan"],
+        },
+        new()
+        {
+            Id = "keys.usage.codexPlan", Section = "Subscriptions",
+            Title = "Codex usage", Detail = "What OpenClicky has used on your ChatGPT plan, and how full its limits are.",
+            Keywords = ["usage", "credits", "tracker", "limit", "tokens", "codex", "chatgpt", "plan"],
+        },
+        new()
+        {
+            Id = "keys.usage.sarvam", Section = "Plan & usage",
+            Title = "Sarvam", Detail = "Billed by Sarvam to your key.", Keywords = ["sarvam", "billing", "engine", "dashboard"],
+            IsRelevant = () => !string.IsNullOrWhiteSpace(shellSettings().SarvamKey),
+        },
+        new()
+        {
+            Id = "keys.plansNote", Section = "Subscriptions", Chrome = SettingsItemChrome.Footer,
             Title = "What a plan can do", Detail = PlansNoteText, Keywords = ["subscription", "plan"],
         },
     ];
 
-    public const string KeysNoteText = "Your keys go straight to that provider, never through OpenClicky, and are used instead of the free credits. Stored in %USERPROFILE%\\.openclicky\\shell.json.";
+    public const string KeysNoteText = "Your keys go straight to that provider. Stored in %USERPROFILE%\\.openclicky\\shell.json.";
 
     public const string PlansNoteText = "A plan answers questions, points, and does quick actions like opening apps or making folders. Bigger tasks need the agent. Codex answers in one go, a few seconds after you ask.";
-
-    public IReadOnlyList<SettingsItem> AccountItems()
-    {
-        SettingsItem Item(string id, string section, string title, string detail, string[] keywords, Func<bool>? isRelevant = null) => new()
-        {
-            Id = id, Section = section, Title = title, Detail = detail, Keywords = keywords,
-            IsRelevant = isRelevant ?? (() => true),
-        };
-        return
-        [
-            Item("account.profile", "", "Account", "Sign in or out. A free account adds AI polish and spoken answers; dictation on this PC works without one.",
-                ["account", "sign in", "sign up", "sign out", "log in", "log out", "create", "email", "code", "free"]),
-            Item("account.plan", "Plan & usage", "Free allowance", "How much of this month’s free allowance is used.",
-                ["billing", "allowance", "usage", "plan", "cost", "price", "limit"]),
-            Item("account.usage.sarvam", "Plan & usage", "Sarvam", "Billed by Sarvam to your key.", ["sarvam", "billing", "engine", "dashboard"],
-                () => !string.IsNullOrWhiteSpace(shellSettings().SarvamKey)),
-            Item("account.usage.backend", "Plan & usage", "OpenAI and AssemblyAI", "Through OpenClicky.",
-                ["openai", "assemblyai", "allowance", "metered", "engine"]),
-            Item("account.backendHost", "Backend", "Host", "Where OpenClicky’s model calls go. Change it in shell.json.",
-                ["backend", "server", "url", "host", "shell.json"]),
-            Item("account.backendToken", "Backend", "Session token", "Written when you sign in.", ["token", "bearer", "shell.json", "session"]),
-        ];
-    }
 
     // MARK: - Privacy & Security (SettingsPrivacyPage.swift)
 
@@ -595,7 +592,7 @@ public static class AppVersion
         }
     }
 
-    public const string SourceUrl = "https://github.com/prasanthsasikumar/openclicky";
-    public const string IssuesUrl = "https://github.com/prasanthsasikumar/openclicky/issues";
-    public const string ReadmeUrl = "https://github.com/prasanthsasikumar/openclicky#readme";
+    public const string SourceUrl = "https://github.com/Nicolas-Cilia/openclicky-fork";
+    public const string IssuesUrl = "https://github.com/Nicolas-Cilia/openclicky-fork/issues";
+    public const string ReadmeUrl = "https://github.com/Nicolas-Cilia/openclicky-fork#readme";
 }

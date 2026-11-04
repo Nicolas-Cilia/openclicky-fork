@@ -63,7 +63,6 @@ public sealed class AppComposition : ICompanionHost, IDisposable
         OpenClickyConfiguration.EnsureSettingsFileExists();
         OpenClickyConfiguration.StartWatchingSettingsFile(SynchronizationContext.Current);
         OpenClickyConfiguration.SettingsFileUnreadable += reason => AppLog.Write($"settings: shell.json unreadable: {reason}");
-        OpenClickyAuthSession.Shared.Start(SynchronizationContext.Current);
 
         RegisterLocalModels(platform.Processes, platform.Network, preferences, platform.MainThread, dictationSettings);
         SpeechVoiceServices.Current = SpeechVoiceServices.ForThisPC(platform.SystemVoice);

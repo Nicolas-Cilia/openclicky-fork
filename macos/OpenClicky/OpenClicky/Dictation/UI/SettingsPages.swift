@@ -16,21 +16,21 @@ import SwiftUI
 /// The settings pages. Six are in the sidebar (`sidebarPages`, in its order); The orb and Calendars
 /// are opened from a row on their parent page and keep the parent selected in the sidebar. The
 /// order follows the Claude Design "OpenClicky settings — redesign mockups": the two things
-/// OpenClicky does (Dictation, Clicky), where it lives (Island), what pays for it (Keys & Account),
+/// OpenClicky does (Dictation, Clicky), where it lives (Island), what pays for it (Keys & Plans),
 /// what it may see (Privacy), then General. `SettingsLayout` says which rows each page holds.
 enum DictationSettingsPage: String, CaseIterable, Identifiable {
-    case dictation, clicky, island, account, privacy, general, orb, calendars
+    case dictation, clicky, island, keys, privacy, general, orb, calendars
     var id: String { rawValue }
 
     /// The pages the sidebar lists, in order.
-    static let sidebarPages: [DictationSettingsPage] = [.dictation, .clicky, .island, .account, .privacy, .general]
+    static let sidebarPages: [DictationSettingsPage] = [.dictation, .clicky, .island, .keys, .privacy, .general]
 
     /// The sidebar page a page opened from a row belongs to; a sidebar page is its own.
     var sidebarPage: DictationSettingsPage {
         switch self {
         case .orb: return .dictation
         case .calendars: return .island
-        case .dictation, .clicky, .island, .account, .privacy, .general: return self
+        case .dictation, .clicky, .island, .keys, .privacy, .general: return self
         }
     }
 
@@ -39,7 +39,7 @@ enum DictationSettingsPage: String, CaseIterable, Identifiable {
         case .dictation: return "Dictation"
         case .clicky: return "Clicky"
         case .island: return "Island"
-        case .account: return "Keys & Account"
+        case .keys: return "Keys & Plans"
         case .privacy: return "Privacy"
         case .general: return "General"
         case .orb: return "The orb"
@@ -58,7 +58,7 @@ enum DictationSettingsPage: String, CaseIterable, Identifiable {
         case .dictation: return "Hold fn, speak, and the words land at your cursor."
         case .clicky: return "Hold ⌃⌥ and ask about what’s on screen."
         case .island: return "What lives around the notch."
-        case .account: return "Your own keys come first. An account is optional."
+        case .keys: return "Connect Claude or Codex, or add your own keys."
         case .privacy: return "What OpenClicky can see, and what it keeps."
         case .general: return "Startup, appearance and updates."
         case .orb: return "The small narrator that shows while you dictate."
@@ -72,7 +72,7 @@ enum DictationSettingsPage: String, CaseIterable, Identifiable {
         case .dictation: return "mic.fill"
         case .clicky: return "sparkle"
         case .island: return "rectangle.topthird.inset.filled"
-        case .account: return "key.fill"
+        case .keys: return "key.fill"
         case .privacy: return "hand.raised.fill"
         case .general: return "gearshape.fill"
         case .orb: return "capsule.fill"
@@ -85,7 +85,7 @@ enum DictationSettingsPage: String, CaseIterable, Identifiable {
         case .dictation, .orb: return Color(red: 0.039, green: 0.518, blue: 1.0)
         case .clicky: return Color(red: 0.686, green: 0.322, blue: 0.871)
         case .island, .calendars: return Color(red: 0.11, green: 0.11, blue: 0.118)
-        case .account: return Color(red: 0.204, green: 0.78, blue: 0.349)
+        case .keys: return Color(red: 0.204, green: 0.78, blue: 0.349)
         case .privacy: return Color(red: 0.369, green: 0.361, blue: 0.902)
         case .general: return Color(red: 0.557, green: 0.557, blue: 0.576)
         }

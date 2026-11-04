@@ -238,6 +238,7 @@ extension HUDPlacement {
     /// The pop-up's label in the Settings window ("Left edge").
     var settingsTitle: String {
         switch self {
+        case .automatic: return "Automatic"
         case .notch: return "Notch"
         case .left: return "Left edge"
         case .right: return "Right edge"
@@ -247,6 +248,7 @@ extension HUDPlacement {
 
     var settingsDetail: String {
         switch self {
+        case .automatic: return "Hangs from the notch, and moves to the right edge while another app is using the notch."
         case .notch: return "Hangs from the notch. Hover to peek, click to open."
         case .left: return "A drawer on the left edge of every screen. Hover the handle to open."
         case .right: return "A drawer on the right edge of every screen. Hover the handle to open."

@@ -57,7 +57,7 @@ extension SettingsCatalog {
     /// Settings → Shortcuts: every key OpenClicky listens for, at a glance.
     func keyboardItems() -> [SettingsItem] {
         let key = settings.dictationKey.keycapLabel
-        let usesRealtime = AccountCapabilities.current().usesRealtime
+        let usesRealtime = ProviderCapabilities.current().usesRealtime
         return [
             SettingsItem(
                 id: "keyboard.edit",

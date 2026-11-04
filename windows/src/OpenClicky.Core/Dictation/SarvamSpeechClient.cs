@@ -30,8 +30,8 @@ public sealed class SarvamSpeechException : Exception
 
     private static string Describe(SarvamSpeechErrorKind kind, int status, string detail) => kind switch
     {
-        SarvamSpeechErrorKind.NoKey => "sarvam needs your key. paste it under settings → account.",
-        SarvamSpeechErrorKind.KeyRefused => "sarvam did not accept the key. check it under settings → account.",
+        SarvamSpeechErrorKind.NoKey => "sarvam needs your key. paste it under settings → keys & plans.",
+        SarvamSpeechErrorKind.KeyRefused => "sarvam did not accept the key. check it under settings → keys & plans.",
         SarvamSpeechErrorKind.OutOfCredits => "sarvam says this key is out of credits (dashboard.sarvam.ai).",
         SarvamSpeechErrorKind.Busy => "sarvam is busy. try again in a moment.",
         SarvamSpeechErrorKind.Refused => $"sarvam refused ({status}): {detail}",
@@ -314,7 +314,7 @@ public sealed class SarvamSpeechClient
     }
 
     public static string DecodeChat(byte[] data) =>
-        BackendTakePolisher.ChatCompletionContent(data)?.Trim()
+        OpenAITakePolisher.ChatCompletionContent(data)?.Trim()
         ?? throw new SarvamSpeechException(SarvamSpeechErrorKind.Unreadable, detail: "there was no message in it");
 
     public static HttpRequestMessage ChatRequest(string system, string user, int maxTokens, string key, Uri host)

@@ -58,11 +58,10 @@ export function parseSseStream(text: string): string {
 
 /**
  * The lightweight "ask" lane: one chat completion, no agent spawn. With the person's own OpenAI key
- * it goes straight to OpenAI; otherwise through the backend on their token, which picks the model
- * (OPENAI_MODEL) for "default".
+ * it goes straight to OpenAI.
  */
 export async function ask(cfg: AgentConfig, question: string, opts: AskOptions = {}): Promise<string> {
-  const route = openaiRoute(cfg, "/v1/chat/completions", "/chat/completions", { "content-type": "application/json", accept: "text/event-stream" });
+  const route = openaiRoute(cfg, "/chat/completions", { "content-type": "application/json", accept: "text/event-stream" });
   if (!route) throw new Error(`ask ${needsOpenAI}`);
   const f = opts.fetchImpl ?? fetch;
 
@@ -77,7 +76,7 @@ export async function ask(cfg: AgentConfig, question: string, opts: AskOptions =
     method: "POST",
     headers: route.headers,
     body: JSON.stringify({
-      model: route.direct ? DIRECT_DEFAULTS.openaiModel : "default",
+      model: DIRECT_DEFAULTS.openaiModel,
       stream: true,
       messages: [
         { role: "system", content: opts.system ?? ASK_SYSTEM_PROMPT },
@@ -85,7 +84,7 @@ export async function ask(cfg: AgentConfig, question: string, opts: AskOptions =
       ],
     }),
   });
-  if (!res.ok) throw new Error(`${route.direct ? "openai" : "backend"} ${res.status}: ${(await res.text()).slice(0, 500)}`);
+  if (!res.ok) throw new Error(`openai ${res.status}: ${(await res.text()).slice(0, 500)}`);
 
   const contentType = res.headers.get("content-type") ?? "";
   if (!contentType.includes("text/event-stream")) {

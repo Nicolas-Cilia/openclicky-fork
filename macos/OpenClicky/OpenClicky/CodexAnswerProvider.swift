@@ -37,6 +37,7 @@ import Foundation
 
 nonisolated struct CodexAnswerProvider: AnswerProvider {
     let executablePath: String
+    private let usageSink: PlanUsageSink
     /// `-m`: e.g. "gpt-5.5"; nil = Codex's default for a ChatGPT sign-in.
     let model: String?
     let processRunner: PlanCLIProcessRunning
@@ -53,8 +54,10 @@ nonisolated struct CodexAnswerProvider: AnswerProvider {
         executablePath: String,
         model: String? = nil,
         processRunner: PlanCLIProcessRunning = PlanCLIProcessRunner(),
-        timeoutSeconds: TimeInterval = 120
+        timeoutSeconds: TimeInterval = 120,
+        usageSink: PlanUsageSink = .none
     ) {
+        self.usageSink = usageSink
         self.executablePath = executablePath
         self.model = model
         self.processRunner = processRunner
@@ -102,6 +105,7 @@ nonisolated struct CodexAnswerProvider: AnswerProvider {
         }
         try Task.checkCancellation()
 
+        if let sample = Self.usageSample(fromJSONLines: output.standardOutputText) { usageSink.record(sample) }
         let outputFileContents = try? String(contentsOfFile: outputFilePath, encoding: .utf8)
         let answerText = try Self.answerText(outputFileContents: outputFileContents, output: output, timeoutSeconds: timeoutSeconds)
         guard !request.tools.isEmpty else {
@@ -231,6 +235,16 @@ nonisolated struct CodexAnswerProvider: AnswerProvider {
         return answerText
     }
 
+    /// The token counts on `turn.completed`. Codex's `input_tokens` already includes the cached ones.
+    static func usageSample(fromJSONLines jsonLines: String) -> PlanUsageSample? {
+        guard let usage = jsonEvents(in: jsonLines).last(where: { $0["type"] as? String == "turn.completed" })?["usage"] as? [String: Any] else { return nil }
+        let count = { (key: String) in usage[key] as? Int ?? 0 }
+        return PlanUsageSample(
+            date: Date(), source: AnswerSource.codexPlan.rawValue, lane: .answer,
+            inputTokens: count("input_tokens"), cachedInputTokens: count("cached_input_tokens"),
+            outputTokens: count("output_tokens"), estimatedCostUSD: nil)
+    }
+
     /// The last failure in `--json` output: a `turn.failed` event's error, else the last `error`
     /// event. The message is often the API's JSON error body itself
     /// (`{"type":"error","status":400,"error":{"message":"..."}}`), so the inner message is used.
@@ -281,7 +295,7 @@ nonisolated struct CodexAnswerProvider: AnswerProvider {
             || lowercasedFailureText.contains("401") || lowercasedFailureText.contains("unauthorized") {
             return "Codex is signed out. Open Terminal, run codex login, and sign in with ChatGPT."
         }
-        if lowercasedFailureText.contains("usage limit") || lowercasedFailureText.contains("rate limit") {
+        if PlanLimitText.matches(trimmedFailureText) {
             return "Your ChatGPT plan has hit its Codex usage limit for now."
         }
         return trimmedFailureText.isEmpty ? "Codex couldn't answer." : "Codex couldn't answer: \(trimmedFailureText)"

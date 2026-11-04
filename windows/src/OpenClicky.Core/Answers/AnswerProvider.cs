@@ -1,6 +1,6 @@
 // Port of macos/OpenClicky/OpenClicky/AnswerProvider.swift
 //
-// Who can answer a question besides Anthropic and the OpenClicky backend. The ask lane, screen
+// Who can answer a question besides Anthropic on an own key. The ask lane, screen
 // grounding and the tour's demo all go through `ClaudeAPI.AnalyzeImageStreamingAsync`; when
 // ProviderRouter picks one of these sources, ClaudeAPI hands the same request to an
 // `IAnswerProvider`:
@@ -8,7 +8,7 @@
 //   - Google Gemini (GeminiAnswerProvider)
 //   - the Claude Code CLI on the person's Claude plan (ClaudeCodeAnswerProvider)
 //   - Codex on the person's ChatGPT plan (CodexAnswerProvider)
-// Keys go straight to their vendor; nothing here talks to the OpenClicky backend.
+// Keys go straight to their vendor.
 //
 // The AnswerSource enum itself lives in OpenClicky.Core.Providers (the router decides on it).
 
@@ -103,6 +103,8 @@ public sealed class AnswerProviderException(AnswerSource source, int status, str
     public AnswerSource AnswerSource { get; } = source;
     public int Status { get; } = status;
     public string VendorMessage { get; } = vendorMessage;
+    /// <summary>A plan refused because it has run out, the one failure another plan can answer for.</summary>
+    public bool IsPlanLimit => AnswerSource is AnswerSource.ClaudeCodePlan or AnswerSource.CodexPlan && PlanLimitText.Matches(VendorMessage);
 
     public override bool Equals(object? obj) =>
         obj is AnswerProviderException other && other.AnswerSource == AnswerSource && other.Status == Status && other.VendorMessage == VendorMessage;

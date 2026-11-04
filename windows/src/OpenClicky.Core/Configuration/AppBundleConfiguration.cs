@@ -1,7 +1,7 @@
 // Ports AppBundleConfiguration.swift: runtime configuration of the built app. The Mac read
 // Info.plist; here a value comes from the entry assembly's [AssemblyMetadata(key, value)] (set
 // in the exe's csproj), else from the `Values` dictionary the app can fill at startup. Blank
-// counts as missing. The PostHog key is empty by default, so analytics stays off.
+// counts as missing.
 
 using System.Reflection;
 
@@ -12,8 +12,6 @@ public static class AppBundleConfiguration
     /// <summary>The embedded "appsettings": defaults the exe may replace before anything reads them.</summary>
     public static Dictionary<string, string> Values { get; } = new(StringComparer.Ordinal)
     {
-        ["PostHogAPIKey"] = "",
-        ["PostHogHost"] = "",
     };
 
     private static Assembly? Bundle => Assembly.GetEntryAssembly();

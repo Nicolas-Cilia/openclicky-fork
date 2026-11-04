@@ -2,7 +2,7 @@
 //  RealtimeVoiceClientTests.swift
 //  OpenClickyTests
 //
-//  `model` in the backend's realtime session response is server-supplied, not a compile-time
+//  `model` in OpenAI's realtime session response is server-supplied, not a compile-time
 //  literal — a malformed value must not force-unwrap the websocket URL into a crash.
 //
 

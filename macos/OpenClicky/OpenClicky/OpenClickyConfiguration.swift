@@ -2,10 +2,9 @@
 //  OpenClickyConfiguration.swift
 //  OpenClicky
 //
-//  OpenClicky integration: where the backend lives, the user's token, and how to
-//  run the `openclicky` CLI. Read from ~/.openclicky/shell.json (shared with the
-//  minimal OpenClickyShell) with environment overrides. The app never holds
-//  provider keys — only the user's OpenClicky token, which the backend verifies.
+//  OpenClicky's settings file and how to run the `openclicky` CLI. Read from
+//  ~/.openclicky/shell.json (shared with the minimal OpenClickyShell) with environment overrides.
+//  Keys in it go straight to their vendor; the plans run through their own CLIs.
 //
 
 import AppKit
@@ -14,15 +13,11 @@ import Foundation
 struct OpenClickyShellSettings: Codable {
     /// Command used to run the CLI, e.g. ["openclicky"] or ["node", "/path/to/openclicky/agent/dist/cli.js"].
     var cliCommand: [String] = ["openclicky"]
-    /// The hosted backend by default (invite accounts and bring-your-own-key both go there); a
-    /// self-hosted backend is one line in shell.json (`http://localhost:8787`).
-    var backendUrl: String = OpenClickyConfiguration.hostedBackendURL
-    var token: String = ""
     /// Working directory for agent runs (created on demand).
     var workspace: String = NSString(string: "~/OpenClicky").expandingTildeInPath
     var model: String = ""
     var voiceSeconds: Int = 5
-    /// "openai" (via the OpenClicky backend, default), "assemblyai" (needs ASSEMBLYAI_API_KEY on the backend), or "apple".
+    /// "openai" (on your own OpenAI key) or "apple" (on this Mac).
     var transcriptionProvider: String? = nil
     /// The language OpenClicky speaks and transcribes, as a language code ("en", "hi"). Unset is
     /// English. See ReplyLanguage.swift for why it is one fixed language and not "follow the user".
@@ -40,14 +35,11 @@ struct OpenClickyShellSettings: Codable {
     var cuaDriverBin: String? = nil
     /// Directory of app-teaching skills (`app-skills/` in the repo). Defaults to the checkout the CLI runs from.
     var appSkillsPath: String? = nil
-    /// Bring your own key: your OpenAI key (and optionally an Anthropic key for the Claude lanes).
-    /// Sent to the backend with every request in `x-openclicky-*` headers; the backend runs the
-    /// request on them instead of its own keys and meters nothing. Leave empty to use OpenClicky's
-    /// keys under your plan.
+    /// Optional API keys, each straight to its vendor: your OpenAI key and your Anthropic key.
     var openaiApiKey: String? = nil
     var anthropicApiKey: String? = nil
     /// Your Sarvam key (dashboard.sarvam.ai): Saaras transcribes takes and a Sarvam model polishes
-    /// them, straight from this Mac. Never sent to the OpenClicky backend.
+    /// them, straight from this Mac.
     var sarvamKey: String? = nil
     /// More keys that can answer questions (AnswerProvider.swift), each straight to its vendor:
     /// OpenRouter (one key for Claude, GPT, Gemini, Llama…), Google Gemini, Groq, Mistral, xAI.
@@ -60,6 +52,8 @@ struct OpenClickyShellSettings: Codable {
     /// to their Claude plan, or Codex signed in with ChatGPT. Off until switched on in Settings.
     var useClaudeCodePlan: Bool? = nil
     var useCodexPlan: Bool? = nil
+    /// The plan that takes over when the default runs out: nil is the other linked plan, "none" none.
+    var backupAnswerSource: String? = nil
     /// Who answers questions: nil or "auto" picks in ProviderRouter's order; otherwise one of
     /// AnswerSource's raw values.
     var answerSource: String? = nil
@@ -69,7 +63,7 @@ struct OpenClickyShellSettings: Codable {
     /// Model overrides per provider ("openrouter": "anthropic/claude-sonnet-4.6"); absent → default.
     var answerModels: [String: String]? = nil
     /// Who speaks answers (SpeechVoiceChoice): nil, "auto" or the older "cloud" picks in order (your
-    /// keys, then the free voice); otherwise "account", "openai", "elevenlabs", "google", "polly",
+    /// keys, then Kokoro, then this Mac); otherwise "openai", "elevenlabs", "google", "polly",
     /// "sarvam", "kokoro" (downloaded on this Mac) or "mac" (this Mac's own voice).
     var speechVoice: String? = nil
     /// Voice-only keys, each straight to its vendor: ElevenLabs, Google Cloud Text-to-Speech (a
@@ -81,18 +75,13 @@ struct OpenClickyShellSettings: Codable {
     /// automatic (Apple Mail when it has accounts here, else Gmail). Settings → Voice.
     var emailApp: String? = nil
     /// Own Spotify app credentials for the "play <song>" lookup, as "clientId:clientSecret";
-    /// without them the OpenClicky backend looks the song up. Settings → Keys & Plans.
+    /// without them Spotify's own search page opens. Settings → Keys & Plans.
     var spotifyCredentials: String? = nil
     /// The Kokoro speaker picked in Settings (its id in the model); nil → the language's default.
     var kokoroSpeaker: Int? = nil
     /// The Mac voice picked in Settings (an AVSpeechSynthesisVoice identifier); nil → the best one
     /// installed for the reply language.
     var macVoiceIdentifier: String? = nil
-    /// Written by sign-in (OpenClickyAuthSession): the refresh token that keeps `token` fresh, when it
-    /// expires (unix seconds), and whose account it is. Absent when the token was pasted by hand.
-    var refreshToken: String? = nil
-    var tokenExpiresAt: Double? = nil
-    var accountEmail: String? = nil
 }
 
 extension OpenClickyShellSettings {
@@ -104,8 +93,6 @@ extension OpenClickyShellSettings {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = OpenClickyShellSettings()
         cliCommand = try container.decodeIfPresent([String].self, forKey: .cliCommand) ?? defaults.cliCommand
-        backendUrl = try container.decodeIfPresent(String.self, forKey: .backendUrl) ?? defaults.backendUrl
-        token = try container.decodeIfPresent(String.self, forKey: .token) ?? defaults.token
         workspace = try container.decodeIfPresent(String.self, forKey: .workspace) ?? defaults.workspace
         model = try container.decodeIfPresent(String.self, forKey: .model) ?? defaults.model
         voiceSeconds = try container.decodeIfPresent(Int.self, forKey: .voiceSeconds) ?? defaults.voiceSeconds
@@ -127,6 +114,7 @@ extension OpenClickyShellSettings {
         xaiApiKey = try container.decodeIfPresent(String.self, forKey: .xaiApiKey)
         useClaudeCodePlan = try container.decodeIfPresent(Bool.self, forKey: .useClaudeCodePlan)
         useCodexPlan = try container.decodeIfPresent(Bool.self, forKey: .useCodexPlan)
+        backupAnswerSource = try container.decodeIfPresent(String.self, forKey: .backupAnswerSource)
         answerSource = try container.decodeIfPresent(String.self, forKey: .answerSource)
         realtimeProvider = try container.decodeIfPresent(String.self, forKey: .realtimeProvider)
         answerModels = try container.decodeIfPresent([String: String].self, forKey: .answerModels)
@@ -138,15 +126,12 @@ extension OpenClickyShellSettings {
         emailApp = try container.decodeIfPresent(String.self, forKey: .emailApp)
         spotifyCredentials = try container.decodeIfPresent(String.self, forKey: .spotifyCredentials)
         kokoroSpeaker = try container.decodeIfPresent(Int.self, forKey: .kokoroSpeaker)
-        refreshToken = try container.decodeIfPresent(String.self, forKey: .refreshToken)
-        tokenExpiresAt = try container.decodeIfPresent(Double.self, forKey: .tokenExpiresAt)
-        accountEmail = try container.decodeIfPresent(String.self, forKey: .accountEmail)
     }
 }
 
 enum OpenClickyConfiguration {
-    /// Where the app talks to unless shell.json says otherwise.
-    static let hostedBackendURL = "https://api.openclicky.org"
+    /// Shows a quiet caption beside the pointer; set by the companion at launch.
+    @MainActor static var showNotice: ((String) -> Void)?
     /// Connectors (Composio app connections): the "connect <app> to openclicky?" card, the composio
     /// tile in the HUD, and the Composio tools handed to the agent. Off for 0.8.0; a later release
     /// turns them back on by flipping this.
@@ -165,13 +150,13 @@ enum OpenClickyConfiguration {
     }
 
     /// Posted when shell.json changed on disk in a way that matters to a live connection: the
-    /// token, the backend, or one of the user's own keys.
+    /// one of the user's own keys.
     static let credentialsChangedNotification = Notification.Name("openClickyCredentialsChanged")
 
     /// What a live session was opened with. When this changes, the session is stale. The Gemini
     /// key and the fast voice pick are in it because either can move realtime to another vendor.
     nonisolated static func credentialFingerprint(of shellSettings: OpenClickyShellSettings) -> [String] {
-        [shellSettings.backendUrl, shellSettings.token, shellSettings.openaiApiKey ?? "", shellSettings.anthropicApiKey ?? "",
+        [shellSettings.openaiApiKey ?? "", shellSettings.anthropicApiKey ?? "",
          shellSettings.geminiApiKey ?? "", shellSettings.realtimeProvider ?? ""]
     }
 
@@ -210,7 +195,7 @@ enum OpenClickyConfiguration {
     }
 
     /// File settings, then environment overrides (handy when launching from a terminal):
-    /// OPENCLICKY_SHELL_CLI ("node /path/cli.js"), BACKEND_URL, OPENCLICKY_TOKEN, OPENCLICKY_WORKSPACE, OPENCLICKY_MODEL.
+    /// OPENCLICKY_SHELL_CLI ("node /path/cli.js"), OPENCLICKY_WORKSPACE, OPENCLICKY_MODEL.
     /// The overrides live only in memory: `update` starts from the file alone, so it never writes them.
     private static func load() -> OpenClickyShellSettings {
         load(fileURL: settingsFileURL, environment: ProcessInfo.processInfo.environment)
@@ -229,8 +214,6 @@ enum OpenClickyConfiguration {
             noteUnreadableSettingsFile(reason, fileURL: fileURL)
         }
         if let cli = environment["OPENCLICKY_SHELL_CLI"], !cli.isEmpty { loadedSettings.cliCommand = cli.split(separator: " ").map(String.init) }
-        if let value = environment["BACKEND_URL"], !value.isEmpty { loadedSettings.backendUrl = value }
-        if let value = environment["OPENCLICKY_TOKEN"], !value.isEmpty { loadedSettings.token = value }
         if let value = environment["OPENCLICKY_WORKSPACE"], !value.isEmpty { loadedSettings.workspace = value }
         if let value = environment["OPENCLICKY_MODEL"], !value.isEmpty { loadedSettings.model = value }
         if let value = environment["OPENCLICKY_TRANSCRIPTION_PROVIDER"], !value.isEmpty { loadedSettings.transcriptionProvider = value }
@@ -288,7 +271,7 @@ enum OpenClickyConfiguration {
         settingsFileProblem = sentence
         Task { @MainActor in
             NotificationCenter.default.post(name: settingsFileUnreadableNotification, object: sentence)
-            AccountProfileStore.shared.showNotice?(sentence)
+            OpenClickyConfiguration.showNotice?(sentence)
         }
     }
 
@@ -311,7 +294,7 @@ enum OpenClickyConfiguration {
         NSWorkspace.shared.open(settingsFileURL)
     }
 
-    /// Changes shell.json in place (sign-in writes the session here) and reloads the settings.
+    /// Changes shell.json in place and reloads the settings.
     static func update(_ change: (inout OpenClickyShellSettings) -> Void) {
         update(fileAt: settingsFileURL, change)
         reload()
@@ -348,6 +331,8 @@ enum OpenClickyConfiguration {
                 // An optional set back to nil is not encoded at all, so it leaves the file too.
                 if fieldChanged { fileJSONObject[fieldName] = encodedAfter[fieldName] }
             }
+            // Written when the app had accounts; nothing reads them now, so a save clears them out.
+            for retiredField in retiredFields { fileJSONObject.removeValue(forKey: retiredField) }
             let data = try JSONSerialization.data(withJSONObject: fileJSONObject, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
             try writeShellSettingsData(data, toFileAt: fileURL)
             return true
@@ -357,12 +342,13 @@ enum OpenClickyConfiguration {
         }
     }
 
+    nonisolated static let retiredFields = ["backendUrl", "token", "refreshToken", "tokenExpiresAt", "accountEmail"]
+
     private static func encodedJSONObject(of shellSettings: OpenClickyShellSettings) throws -> [String: Any] {
         (try JSONSerialization.jsonObject(with: JSONEncoder().encode(shellSettings)) as? [String: Any]) ?? [:]
     }
 
-    /// shell.json holds the session token, the refresh token, and the user's own OpenAI/Anthropic
-    /// keys, so it must never be readable by anyone but the owner. `Data.write(to:)` uses the
+    /// shell.json holds the user's own API keys, so it must never be readable by anyone but the owner. `Data.write(to:)` uses the
     /// process's default file permissions (0644 — world-readable) with no way to pass a mode, so the
     /// directory is created at 0700 and the file is chmod'd to 0600 unconditionally after every
     /// write. That "unconditionally" matters: an existing file from before this function existed
@@ -396,35 +382,13 @@ enum OpenClickyConfiguration {
 
     // MARK: - Derived values
 
-    /// Backend base URL without a trailing slash.
-    static var backendBaseURL: String {
-        var url = settings.backendUrl.trimmingCharacters(in: .whitespacesAndNewlines)
-        while url.hasSuffix("/") { url.removeLast() }
-        return url.isEmpty ? hostedBackendURL : url
-    }
-
-    static var backendHostDescription: String {
-        URL(string: backendBaseURL)?.host ?? backendBaseURL
-    }
-
-    static var token: String? {
-        let trimmedToken = settings.token.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmedToken.isEmpty ? nil : trimmedToken
-    }
-
-    /// True when this Mac is signed in to an OpenClicky account (a token in shell.json). The account
-    /// routes (/billing/me, /auth/*, AssemblyAI) need it; model calls do not (see `isConfigured`).
-    static var hasAccountToken: Bool { token != nil }
-
-    /// True when model calls can be made at all: an own OpenAI or Anthropic key (no account needed,
-    /// the calls go straight to the vendor) or an account. Which route each call takes is
-    /// `ProviderRouter`'s decision.
+    /// True when something can answer a question: an API key or a plan switched on. Which one
+    /// answers each call is `ProviderRouter`'s decision.
     static var isConfigured: Bool { isConfigured(settings) }
 
     nonisolated static func isConfigured(_ shellSettings: OpenClickyShellSettings) -> Bool {
         let credentials = ProviderCredentials(settings: shellSettings)
-        // An account, an OpenAI key (it also covers speech and dictation), or anything that can answer.
-        return credentials.accountToken != nil || credentials.openAIKey != nil || !credentials.answerSourcesInOrder.isEmpty
+        return !credentials.answerSourcesInOrder.isEmpty
     }
 
     /// Where cua-driver is, mirroring the CLI's own precedence (`resolveCuaDriverBin` in
@@ -506,32 +470,20 @@ enum OpenClickyConfiguration {
         return trimmedValue.isEmpty ? nil : trimmedValue
     }
 
-    /// True when this Mac pays its own provider bills: an OpenAI key is set in shell.json.
+    /// True when an OpenAI key is set in shell.json.
     static func usesOwnKeys(_ settings: OpenClickyShellSettings = settings) -> Bool {
         cleaned(settings.openaiApiKey) != nil
     }
     static var usesOwnKeys: Bool { usesOwnKeys(settings) }
 
-    /// Adds the account's bearer token to a backend request. Never the person's own provider keys:
-    /// a capability they have a key for goes straight to its vendor (`ProviderRouter`), so the
-    /// backend only sees calls that run on the account. No token, no header: the backend refuses
-    /// an empty `Authorization: Bearer `.
-    static func authorize(_ request: inout URLRequest) {
-        if let token {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-    }
-
-    /// Environment for the `openclicky` CLI subprocess. Provider keys are stripped on purpose; the
-    /// user's own keys travel under OpenClicky names so the CLI forwards them as headers.
+    /// Environment for the `openclicky` CLI subprocess. The shell's provider keys are stripped on
+    /// purpose; the keys set for OpenClicky travel under OpenClicky names.
     static var cliProcessEnvironment: [String: String] { cliProcessEnvironment(from: settings) }
 
     static func cliProcessEnvironment(from settings: OpenClickyShellSettings) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
-        var backendUrl = settings.backendUrl.trimmingCharacters(in: .whitespacesAndNewlines)
-        while backendUrl.hasSuffix("/") { backendUrl.removeLast() }
-        environment["BACKEND_URL"] = backendUrl.isEmpty ? hostedBackendURL : backendUrl
-        if let token = cleaned(settings.token) { environment["OPENCLICKY_TOKEN"] = token }
+        environment.removeValue(forKey: "BACKEND_URL")
+        environment.removeValue(forKey: "OPENCLICKY_TOKEN")
         if let model = cleaned(settings.model) { environment["OPENCLICKY_MODEL"] = model }
         environment["OPENCLICKY_WORKSPACE"] = NSString(string: settings.workspace).expandingTildeInPath
         if let writableRoots = settings.writableRoots { environment["OPENCLICKY_WRITABLE_ROOTS"] = writableRoots.joined(separator: ",") }

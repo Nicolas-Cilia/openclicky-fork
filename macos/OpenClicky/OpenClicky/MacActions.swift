@@ -650,8 +650,8 @@ final class MacActionRunner {
                 guard await extras.launchSpotify() else { return .spotifyStarting }
             }
             let tracks = await extras.lookUpTrack(query)
-            // No lookup answered, or it answered with something that is not a track (the backend
-            // is not trusted with what Spotify is told to play): Spotify's own search leaves the
+            // No lookup answered, or it answered with something that is not a track (a reply is
+            // not trusted with what Spotify is told to play): Spotify's own search leaves the
             // person one click away.
             guard let track = MusicTrackPicker.pick(tracks, for: query), track.uri.hasPrefix("spotify:track:") else {
                 extras.openSpotifySearch(query)
@@ -725,7 +725,7 @@ final class MacActionRunner {
     static func live(workspaceDirectory: URL) -> MacActionRunner {
         let minimizedWindows = MinimizedWindowsMemory()
         let musicLookup = { () -> MusicLookup in
-            let route = MusicLookupRoute.route(credentials: OpenClickyConfiguration.settings.spotifyCredentials, backendURL: URL(string: OpenClickyConfiguration.settings.backendUrl))
+            let route = MusicLookupRoute.route(credentials: OpenClickyConfiguration.settings.spotifyCredentials)
             if route.logName != lastLoggedMusicRoute {
                 lastLoggedMusicRoute = route.logName
                 AppLog.append("route: music lookup → \(route.logName)")

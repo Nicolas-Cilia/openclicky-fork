@@ -24,8 +24,7 @@ public sealed class DictationProviderFactory(IOfflineSpeechRecognizer offlineRec
     public IBuddyTranscriptionProvider MakeSarvam(Func<DictationLanguage> language) =>
         new SarvamTranscriptionProvider(() => language().Code, unavailableReason: DictationEngineResolver.SarvamUnavailableReason);
 
-    /// <summary>OpenAI's transcription: on the person's own OpenAI key, else the backend's /agent/transcribe (the router decides).</summary>
-    public IBuddyTranscriptionProvider MakeOpenClicky(Func<string?> bareLanguageCode) => new OpenAIAudioTranscriptionProvider(bareLanguageCode);
+    /// <summary>OpenAI's transcription: on the person's own OpenAI key.</summary>
+    public IBuddyTranscriptionProvider MakeOpenAI(Func<string?> bareLanguageCode) => new OpenAIAudioTranscriptionProvider(bareLanguageCode);
 
-    public IBuddyTranscriptionProvider MakeAssemblyAI(Func<string?> bareLanguageCode) => new AssemblyAIStreamingTranscriptionProvider(bareLanguageCode);
 }

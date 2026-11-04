@@ -1,345 +1,74 @@
-# Setup and running OpenClicky from source
-
-Everything needed to build the pieces yourself: the backend that holds the keys, the `openclicky`
-CLI, and the macOS app. If you only want to use the app, the
-[download and three-step start](../README.md) are all you need.
+# Building and releasing
 
 ## Prerequisites
 
-- Node 22+, and Codex CLI: `npm i -g @openai/codex` (developed against 0.152.1)
-- `ffmpeg` for the voice lane (`brew install ffmpeg`); Xcode/Swift 5.9+ for the macOS shell
-- A Supabase project (or just a JWT secret for local dev) and an OpenAI key; optionally an Anthropic
-  key for the gate — all configured on the **backend only**
+- Node 22+
+- Codex CLI (`npm i -g @openai/codex`), signed in with `codex login`
+- Mac: Xcode, and `ffmpeg` for the CLI's voice commands (`brew install ffmpeg`)
+- Windows: .NET 8 SDK
 
-## Setup
-
-```bash
-npm install
-npm run build          # builds backend/ and agent/ (regenerates the skills manifest)
-npm test               # unit tests + integration tests against the real codex binary (fake model)
-
-cp backend/.dev.vars.example backend/.dev.vars   # keys + secrets (backend)
-cp .env.example .env                              # agent settings (BACKEND_URL, OPENCLICKY_TOKEN, …)
-npm link -w agent                                 # optional: puts `openclicky` on your PATH
-```
-
-`backend/.dev.vars` needs at least `OPENAI_API_KEY`, `SESSION_TOKEN_SECRET`, and either
-`SUPABASE_JWT_SECRET` (HS256, Supabase → Settings → API → JWT Secret) or `SUPABASE_URL` (asymmetric
-keys, verified via JWKS). `ANTHROPIC_API_KEY` enables the gate; without it `do`/`voice` fall back to a
-local heuristic. See `.env.example` for every variable.
-
-## Choosing a provider
-
-The backend speaks three upstream dialects, so any of these work:
-
-| Setup | Agent (Codex) | Gate + teacher (Claude) | Ask | Speech in | Speech out | Realtime voice |
-|---|---|---|---|---|---|---|
-| OpenAI key + Anthropic key | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **OpenRouter key only** | ✓ (Responses API) | ✓ (Anthropic-format `/messages`) | ✓ | ✓ (`openai/gpt-4o-mini-transcribe`) | Mac system voice | ✗ |
-| OpenRouter + ElevenLabs | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
-
-For OpenRouter set `OPENAI_BASE_URL=https://openrouter.ai/api/v1`, `ANTHROPIC_BASE_URL=https://openrouter.ai/api`,
-the same key in both `*_API_KEY`s, and the model mapping (`OPENAI_MODEL_PREFIX=openai/`,
-`ANTHROPIC_MODEL_PREFIX=anthropic/`, `MODEL_ALIASES=claude-sonnet-4-6=anthropic/claude-sonnet-4.6,…`); the
-commented block in `.env.example` has the full set. When `/tts` has no provider the app speaks with the
-built-in macOS voice.
-
-Keep the backend running at login so the app works straight from Spotlight:
+## Build and test
 
 ```bash
-scripts/install-backend-service.sh       # launchd user agent org.openclicky.backend on :8787 (logs in ~/Library/Logs/OpenClicky)
-scripts/install-backend-service.sh --uninstall
+npm ci
+npm run build -w agent
+npm test                    # agent tests
+
+# Mac app, from macos/OpenClicky
+xcodebuild test -project OpenClicky.xcodeproj -scheme OpenClicky -destination 'platform=macOS' \
+  CODE_SIGNING_ALLOWED=NO -only-testing:OpenClickyTests
+
+# Windows shared code
+dotnet test windows/tests/OpenClicky.Core.Tests/OpenClicky.Core.Tests.csproj
 ```
-
-## Run the backend
-
-```bash
-npm run dev -w backend            # Node, http://localhost:8787 (reads backend/.dev.vars)
-npm run dev:worker -w backend     # same app under `wrangler dev` (Cloudflare Workers runtime)
-curl localhost:8787/health        # → {"ok":true}
-```
-
-| Route | Auth | Purpose |
-|---|---|---|
-| `GET /health` | none | liveness |
-| `POST /agent/session-token` | Supabase JWT | `{ token, expiresAt, sub }` — short-lived HS256 session token |
-| `POST /v1/chat/completions` | token | OpenAI Chat Completions proxy (SSE). `model: "default"` → `OPENAI_MODEL` |
-| `POST /v1/responses` | token | OpenAI Responses proxy — what Codex uses (`wire_api = "chat"` is gone in Codex ≥ 0.15x) |
-| `POST /v1/messages` | token | Anthropic Messages proxy. `model: "default"` → `ANTHROPIC_MODEL` (the gate) |
-| `POST /agent/realtime/session` | token | mints an ephemeral OpenAI Realtime client secret (`OPENAI_REALTIME_MODEL`) |
-| `POST /agent/transcribe` | token | `{ audio: <base64>, mime?, language? }` → `{ text }` via `OPENAI_TRANSCRIBE_MODEL` |
-| `GET /skills/library` | token | the bundled skill manifest (id, name, description, kind, files; app skills carry `apps`/`sites`) |
-| `GET /billing/me` | token | `{ byok, plan, status, used, limit, periodEnd }` — what the app's Settings → Account shows |
-| `POST /billing/checkout` | token | `{ plan }` → `{ url }`: a Stripe Checkout page for that plan |
-| `POST /billing/portal` | token | `{ url }`: Stripe's customer portal (invoices, upgrade, cancel) |
-| `POST /billing/webhook` | Stripe signature | subscription lifecycle → `oc_subscriptions` |
-
-"token" = a Supabase JWT or an exchanged session token; the model routes also take no token at all
-when the request brings its own OpenAI key (see below). Every request is logged as one JSON line
-(method, path, status, ms, user id — never bodies or tokens). Deploy: `cd backend && npx wrangler deploy`,
-then `wrangler secret put` each secret.
-
-### Paying for model calls: your own keys, or a free account
-
-OpenClicky is open source and free for anyone to use. **Your own keys are the primary route, and need
-no account**: with a key, the app and the CLI call OpenAI and Anthropic directly and OpenClicky's
-servers are not involved. The hosted backend (`https://api.openclicky.org`, the app's default)
-and its free accounts are for people without keys who want to try the features; it runs on a research
-grant (`GRANT_ACCOUNTS=true`).
-
-- **Your own keys (no account).** Put `"openaiApiKey": "sk-…"` in `~/.openclicky/shell.json`, and
-  `"anthropicApiKey": "sk-ant-…"` too for the Claude lanes, or set `OPENCLICKY_OPENAI_KEY` /
-  `OPENCLICKY_ANTHROPIC_KEY` for the CLI. Leave `token` empty. Each call then goes straight to the
-  vendor with the request the backend would have sent for it, and a key never leaves the Mac except to
-  its own vendor:
-
-  | Capability | Own key used | Without that key |
-  |---|---|---|
-  | ⌃⌥ ask lane, screen grounding (Claude) | Anthropic | the account's `/chat`; no account: "needs your anthropic key" |
-  | spoken answers | OpenAI speech (`gpt-4o-mini-tts`) | the account's `/tts` (ElevenLabs) |
-  | transcription (upload) | OpenAI (`gpt-4o-mini-transcribe`) | the account's `/agent/transcribe` |
-  | Realtime voice | OpenAI client secret, then OpenAI's socket | the account's `/agent/realtime/session` |
-  | dictation clean-up | OpenAI chat; with only an Anthropic key, Claude Haiku | the account's `/v1/polish` |
-  | agent (Codex) and the CLI | OpenAI (`config/codex-config.toml` points Codex at `api.openai.com`) | the backend on `OPENCLICKY_TOKEN` |
-  | AssemblyAI dictation | — (minted on OpenClicky's AssemblyAI key) | account only |
-
-  **The Claude lanes need an Anthropic key too**: an OpenAI key alone covers everything else, and the
-  ask lane says so instead of failing quietly (the CLI gate falls back to its heuristic). Every route
-  the app picks is written to `~/Library/Logs/OpenClicky/app.log` (`route: …`, never a key).
-- **Older apps (0.6–0.8) and own keys through the backend.** Those versions send the key to the
-  backend as `x-openclicky-openai-key` / `x-openclicky-anthropic-key`. The backend accepts that with
-  no token at all on the model routes (`/v1/*`, `/chat`, `/tts`, `/agent/*`, `/skills/*`): it runs the
-  call on those keys only, never on its own, meters nothing and limits nothing — it is the person's key. A request that sends an `Authorization` header is judged on it alone, so a bad token
-  is still a 401, and the account routes (`/billing/*`, `/auth/*`, `/transcribe-token`) still need an
-  account. Without an Anthropic key the Claude lanes answer `402 byok_missing_anthropic_key`.
-- **A free account on the grant.** Setup asks only for an email. The backend (`POST /auth/start`)
-  makes a Supabase anonymous user with that email attached and mails a confirmation link; the account
-  works at once, capped at $1 per Mac until the link is clicked, then $2 a day and $10 a month. An
-  email that already has an account gets a 6-digit code instead (`POST /auth/code`). There are no
-  passwords. Spend is reserved and settled in micro-dollars in Postgres (`oc_reserve` / `oc_settle`),
-  with a global monthly cap. Past a limit the backend answers `402` with `confirm_email`,
-  `daily_limit`, `personal_limit` or `monthly_budget`. Operators manage accounts with the admin
-  script (`add`, `list`, `budget`, `limit`, `daily`, `block`, `prune`, …) against the Supabase project
-  directly; [docs/accounts-runbook.md](accounts-runbook.md) has the env, the Supabase settings and the
-  rollout.
-  (Stripe Checkout / portal / webhook routes exist in `backend/src/stripe.ts` for a paid plan later; with
-  no `STRIPE_*` env they answer 503 and nothing in the app points at them.)
-
-Backend env for this: `SUPABASE_URL` + `SUPABASE_SERVICE_KEY` (the billing store; without them nothing
-is metered, which is what a self-hosted backend wants), `SUPABASE_PUBLISHABLE_KEY` (published by
-`GET /auth/config`), `GRANT_ACCOUNTS=true` plus the grant limits (see the runbook), and for tests
-`BYOK_OPENAI_BASE_URL` / `BYOK_ANTHROPIC_BASE_URL` / `BYOK_ANTHROPIC_MODEL`. Load the tables once with
-`backend/supabase/schema.sql` (see the shared Supabase runbook).
-
-### Hosting the backend
-
-`npm run deploy:backend` rsyncs the repo to the VPS, builds `backend/Dockerfile` there, starts the
-container from `backend/deploy/docker-compose.yml` (bound to 127.0.0.1:8787, 256 MB cap) and adds the
-Caddy site block for `api.openclicky.org` once. `--env` also uploads `backend/.dev.vars` as
-`/opt/openclicky/backend.env`; the hosted deploy uses `DEPLOY_ENV_FILE=backend/.hosted.vars` (see the
-accounts runbook — never deploy it without `GRANT_ACCOUNTS=true`). DNS: an A record
-for the hostname pointing at the server.
 
 ## Run the agent
 
-```bash
-export BACKEND_URL=http://localhost:8787
-export OPENCLICKY_TOKEN=<supabase jwt or session token>   # see "Auth flow"
+Agent tasks run through the `openclicky` tool in `agent/`, which starts Codex in its own folder
+(`~/.openclicky/codex-home`) and shares your ChatGPT sign-in from `~/.codex/auth.json`. With an
+OpenAI key set, it uses the key instead.
 
-openclicky run "create a file called hello.txt containing 'hi'"     # full agent run on a new thread
-openclicky run "now add a second line" --thread <id>                # resume (id is printed on stderr)
-openclicky run "what is on my screen?" --screenshot                 # capture + attach (Screen Recording permission)
-openclicky run "clean up the repo" --approve                        # ask before escalated commands / file changes
-openclicky ask "say hello in 5 words"                               # one chat completion, no agent
-openclicky do "what does ENOENT mean"                               # gate picks ask; `do "fix the build"` picks agent
-openclicky voice --seconds 5                                        # record mic → transcribe → gate → ask/run
-openclicky voice --file note.wav --transcribe-only
-openclicky talk --voice marin                                       # always-on conversation via OpenAI Realtime (Ctrl-C to hang up)
-openclicky threads list | show <id> | archive <id>
-openclicky skills list | activate <id> | deactivate <id> | path       # the user skill library
-```
-
-`talk` is the HeyClicky-style voice loop: the backend mints an ephemeral Realtime client secret,
-the CLI streams microphone PCM (ffmpeg) to OpenAI Realtime over WebSocket, plays spoken replies
-(ffplay), handles barge-in with server VAD, and exposes a `send_to_agent` tool so the voice model
-hands real work to a Codex thread (kept across the conversation). Transcripts print as `you:` /
-`openclicky:`. Needs `ffmpeg` + `ffplay` and Microphone permission for your terminal.
-
-Flags on `run`/`do`/`voice`: `--thread`, `--cwd`, `--model` (e.g. `gpt-5.6-luna`), `--approve`,
-`--image`, `--screenshot`, `--json`, `--events`, `--verbose`, `--backend-url`, `--token`. Agent text
-streams to stdout as it is generated; milestones (`thread: …`, `ran: …`, approvals) go to stderr;
-`artifacts:` lists new/changed files in the workspace. Non-zero exit on failure. `--events` switches
-to JSON Lines on stdout (`lane`, `event`, `delta`, `answer`, `result`, `error`) for UIs like the shell.
-
-Codex state lives in an isolated `CODEX_HOME` (`~/.openclicky/codex-home`, `OPENCLICKY_CODEX_HOME`),
-separate from your personal `~/.codex`, stable across runs so threads can be resumed. Its
-`config.toml` is regenerated from `config/codex-config.toml` on every run. Approvals are
-auto-accepted by default (the sandbox is `workspace-write`); `--approve` switches Codex to
-`on-request` and prompts you. Set `COMPOSIO_MCP_URL` / `CUA_DRIVER_BIN` to render the `composio` /
-`computer-use` MCP servers into the config.
-
-### Composio (account integrations: Gmail, YouTube, GitHub, Slack, …)
-
-Connectors are switched off in 0.8.0: the app shows no connect card or composio tile and does not hand
-Composio to the agent, whatever `shell.json` says. A later release turns them back on
-(`OpenClickyConfiguration.connectorsEnabled`). The steps below apply once it does.
-
-Composio hosts one MCP server, Composio Connect, that reaches 1000+ apps through a handful of meta-tools
-(`COMPOSIO_SEARCH_TOOLS`, `COMPOSIO_MANAGE_CONNECTIONS`, `COMPOSIO_MULTI_EXECUTE_TOOL`, …). The agent asks it to
-connect an account and you approve an OAuth link in the browser once. The free tier is 20,000 tool calls a
-month with no card (paid plans start at $29/month for 200,000 calls).
-
-1. Sign up at [composio.dev](https://composio.dev) (the login below must use the same email).
-2. Point the agent at Composio Connect in `~/.openclicky/shell.json` and restart the app:
-
-   ```json
-   { "composioMcpUrl": "https://connect.composio.dev/mcp" }
-   ```
-
-   (Running the CLI by hand: `COMPOSIO_MCP_URL`.) The Codex config gains `[mcp_servers.composio]` marked
-   `required`, so a turn never starts before its tools are listed.
-3. Log Codex into Composio once per machine — it opens Composio's authorization page:
-
-   ```bash
-   openclicky integrations login      # or: CODEX_HOME=~/.openclicky/codex-home codex mcp login composio
-   openclicky integrations status     # "Composio: logged in"
-   ```
-
-   The token lives in the macOS keychain ("Codex MCP Credentials"), not in the repo or shell.json.
-4. Open Gmail or YouTube: the "Connect <app> to OpenClicky" card appears; **Yes** hands the agent the
-   connection, which opens Composio's authorization link for that account. After that, ask for things
-   like "retrieve comments on my latest video" and the agent uses the connected account.
-
-A Composio consumer key (`composioApiKey` in shell.json / `COMPOSIO_API_KEY`) is also accepted and sent as
-the `x-consumer-api-key` header instead of the OAuth login; Composio Connect rejected the key tried here,
-so OAuth is the documented path.
-
-## Run the macOS app
-
-The primary shell is `macos/OpenClicky`: a renamed fork of the original open-source Clicky app (MIT,
-MIT) wired to OpenClicky. See `macos/OpenClicky/OPENCLICKY.md` for the rename map and what changed.
+Each machine needs this repository checked out and built. Then either put the tool on your PATH:
 
 ```bash
-open macos/OpenClicky/OpenClicky.xcodeproj     # set your signing team, then Run
+npm link -w agent
 ```
 
-Configure `~/.openclicky/shell.json` (panel → Backend row, or create it by hand):
+or point the app at it in `~/.openclicky/shell.json`:
 
 ```json
-{ "cliCommand": ["node", "/path/to/openclicky/agent/dist/cli.js"],
-  "backendUrl": "http://localhost:8787", "token": "<supabase jwt or session token>",
-  "workspace": "/Users/you/OpenClicky", "transcriptionProvider": "openai",
-  "appSkillsPath": "/path/to/openclicky/app-skills" }
+{ "cliCommand": ["node", "/path/to/openclicky-fork/agent/dist/cli.js"] }
 ```
 
-`appSkillsPath` is optional: when it is missing the app derives `app-skills/` from the CLI path
-(`…/agent/dist/cli.js` → repo root), else falls back to `~/.openclicky/app-skills`.
-
-Hold ctrl+option and speak. With **Agent mode** on (default), a cheap gate classifies each
-utterance: questions get the original teacher lane (Claude vision, spoken reply, the blue cursor
-flies to and points at UI elements); "make / fix / create / run…" goes to a Codex thread through
-`openclicky run --events` with the screenshot attached, and the final message is spoken. The
-thread is resumed across turns so follow-ups keep context. The panel shows live agent milestones
-and a "Reveal files" shortcut. With your own keys in shell.json (`openaiApiKey`, `anthropicApiKey`;
-no `token` needed) transcription, Claude and speech go straight to OpenAI and Anthropic; without
-them they go through the backend on your account (`/agent/transcribe`, `/chat`, `/tts`). Analytics are off unless you add a
-PostHog key to Info.plist; launch-at-login is opt-in.
-
-**Pointing from Realtime voice.** The Realtime session carries a `point_at(x, y, label)` function
-tool next to `send_to_agent`. Every turn already attaches the cursor screen as an image, so when you
-ask "where is the export button?" or "how do I open a new tab?", the model calls `point_at` with
-pixel coordinates in that screenshot while it keeps talking; the app maps them to the display
-(scale, y-flip, display origin) and the buddy flies there with the label as its bubble. Several
-calls in one reply make a short walkthrough (one point per step); a repeated point re-flies. Tool
-results go out at once, and the reply continues with a single `response.create` after the model's
-turn ends, so batched calls do not race.
-
-**Skills in the voice prompts.** When you release the shortcut (before the reply is requested; never at key-down, which must open the mic fast) the app looks at the frontmost app (bundle id;
-for browsers the front tab's URL through Accessibility, falling back to the window title), picks
-the matching app-teaching skill, adds your activated talk skills, and sends the combined
-instructions to the Realtime session (`session.update`, only when the text changed; the log shows
-`instructions updated (N chars)`). The Claude teacher lane appends the same block to its system
-prompt." New app skills arrive by pull request (see
-[CONTRIBUTING.md](../CONTRIBUTING.md#add-a-skill-for-an-app)); there is no in-app skill editor.
-
-The first time an app or site whose app-teaching skill names an `integration` (a Composio toolkit:
-Gmail, YouTube, GitHub, Slack, Figma, Google Docs) comes to the front, the island opens a
-**Connect \<app\> to OpenClicky** card (two app icons, No / Not now / Yes, and a scrolling row of example
-prompts read from the skill). Plain apps such as Terminal or Finder never get the card. "Yes" keeps the
-skill and, when `COMPOSIO_MCP_URL` is set, hands the agent the job of connecting the account through
-Composio; without Composio the card says so and offers to open `shell.json`. "No" leaves the skill out
-of the voice prompts from then on (remembered in the app's defaults, reset with
-`defaults delete org.openclicky.app appSkillConnectDecisions`), "Not now" hides the card until the app
-next launches.
-
-### Releases and your local install
+From a terminal:
 
 ```bash
-npm run release:mac            # Release build, signed, verified, zip + dmg, installed to /Applications
-npm run release:mac:publish    # …and tag vX.Y.Z (from macos/OpenClicky/VERSION) + GitHub release
+openclicky run "create a file called hello.txt"   # a full agent task
+openclicky do "what is a monad"                   # picks a quick answer or an agent task
+openclicky threads list
 ```
 
-The script signs with your Apple Development certificate by default (fine for this Mac; other
-Macs must right-click → Open). For public downloads set `OPENCLICKY_SIGN_IDENTITY="Developer ID
-Application: …"` and, once `xcrun notarytool store-credentials` is set up, `OPENCLICKY_NOTARY_PROFILE`.
-Bump `macos/OpenClicky/VERSION` before publishing and write the version's `## x.y.z` section in
-`CHANGELOG.md`: the script puts it in the Sparkle update dialog and under "What's new" on the GitHub
-release, and `--publish` refuses to run without it (`npm run check:changelog` is the same test, run
-in CI). Releases: https://github.com/prasanthsasikumar/openclicky/releases
+`.env.example` lists every setting.
 
-**The dmg installs itself.** Launched from the mounted image, the app offers "Move to Applications"
-(`DiskImageSelfInstaller`), copies itself there, strips the quarantine flag and relaunches the
-installed copy — the copy that then collects the Accessibility and Microphone grants.
+## Release
 
-**Updates come through Sparkle.** `Info.plist` carries `SUFeedURL`
-(`https://github.com/prasanthsasikumar/openclicky/releases/latest/download/appcast.xml`) and the
-EdDSA public key `SUPublicEDKey`. The private half lives in the login keychain of the Mac that cuts
-releases (made once with Sparkle's `generate_keys`; `generate_keys -p` prints the public key).
-`release.sh` reads it from `scripts/sparkle-ed25519.key` (`generate_keys -x` writes it; git-ignored;
-`OPENCLICKY_SPARKLE_KEY_FILE` overrides the path) because `generate_appcast` reading the keychain
-asks for permission in a dialog, which hangs an unattended build. It signs the zip, writes
-`appcast.xml` with `generate_appcast`, and uploads it beside the zip and dmg, so the app's daily
-check (About → check now) sees the new build. A dev build without the key skips the appcast; the app
-then shows "no update feed".
-
-**Checking an engine without the microphone.** A recording stands in for the mic:
+Run this once, ever, on the Mac you publish from:
 
 ```bash
-say -o take.aiff "Tech week starts in San Francisco today." && afconvert -f WAVE -d LEI16@16000 -c 1 take.aiff take.wav
-OpenClicky.app/Contents/MacOS/OpenClicky --openclicky-smoke-transcribe take.wav offline
-OPENCLICKY_SARVAM_KEY=… OpenClicky.app/Contents/MacOS/OpenClicky --openclicky-smoke-transcribe take.wav sarvam
+macos/OpenClicky/scripts/setup-release-keys.sh
 ```
 
-It prints the words heard, then the formatted take (model polish when a key or account is set). The
-Sarvam run was verified live on 2026-10-06 in English and Hindi over both sockets (realtime, with
-partial words as the audio plays, and chunked).
+It creates a self-signed certificate and Sparkle's update key in your login keychain and writes the public
+key to `Info.plist`. **Back up both.** Losing the update key means every installed copy has to be
+replaced by hand. The certificate is what keeps macOS's permissions across updates.
 
-The minimal SwiftPM panel is still available for headless checks:
+To publish (this needs `gh`, signed in, and a `CHANGELOG.md` section for the version in
+`macos/OpenClicky/VERSION`):
 
 ```bash
-cd macos/OpenClickyShell && swift build -c release && .build/release/OpenClickyShell   # ⌥Space toggles
+npm run release:mac            # build, sign and install to /Applications
+npm run release:mac:publish    # ...and publish the GitHub release the app updates from
 ```
 
-## Auth flow
-
-1. The user signs in to **your** Supabase project and gets a JWT (`access_token`).
-   Helper: `openclicky token --email … --password …` (needs `SUPABASE_URL` + `SUPABASE_ANON_KEY`).
-2. The client exchanges it: `POST /agent/session-token` with `Authorization: Bearer <jwt>` →
-   `{ token, expiresAt }`. The session token is an HS256 JWT signed with `SESSION_TOKEN_SECRET`,
-   `typ: openclicky-session`, default lifetime 1h; it cannot be re-exchanged.
-3. The agent presents that token on every backend call; Codex attaches it automatically because the
-   provider config sets `env_key = "OPENCLICKY_SESSION_TOKEN"`. Raw Supabase JWTs are accepted too.
-   None of this is needed with your own keys: those calls go to the vendors directly (Codex then gets
-   `env_key = "OPENCLICKY_OPENAI_KEY"` and `api.openai.com`).
-
-Local development without a Supabase project: put any `SUPABASE_JWT_SECRET` in `backend/.dev.vars`
-and mint a user JWT with `npm run mint-jwt -w backend` — the same token shape Supabase issues under
-its legacy HS256 secret, so it exercises the real verification path.
-
-## Verification notes
-
-Everything above was verified against the real Codex binary with a fake OpenAI/Anthropic upstream
-(no provider keys were available while building). Model-quality behavior with real keys is untested;
-with real keys, drop `--model gpt-5.2` (only the fake needs a classic-tools model — Codex's default
-`gpt-5.6-*` models use its "code mode", which the backend passes through unchanged).
-
+Then run **Actions → windows-release** with the same tag to attach the Windows installers. Windows
+updates come from those releases through Velopack; signing stays optional (`windows/docs/code-signing.md`).

@@ -28,8 +28,7 @@ public sealed record FormattedTake(string Text, SpokenShortcut? ExpandedShortcut
 
 /// <summary>
 /// A model that can rewrite a take. `DictationEngineResolver.MakePolisher` picks one: Sarvam,
-/// OpenAI, Anthropic or another answer key of the person's own, else the OpenClicky backend on an
-/// account (TakePolishers.cs). Windows has no on-device model rung.
+/// OpenAI, Anthropic or another answer key of the person's own (TakePolishers.cs). Windows has no on-device model rung.
 /// </summary>
 public interface ITakePolisher
 {

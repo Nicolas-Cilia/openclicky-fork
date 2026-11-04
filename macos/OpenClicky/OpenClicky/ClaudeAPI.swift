@@ -5,37 +5,33 @@
 
 import Foundation
 
+/// Anthropic refused a question, with the status and body exactly as they came.
+nonisolated struct AnswerHTTPError: LocalizedError, CustomNSError, Equatable {
+    let status: Int
+    let body: Data
+
+    var bodyText: String { String(decoding: body, as: UTF8.self) }
+    var errorDescription: String? { "API Error (\(status)): \(bodyText)" }
+
+    // Bridged to NSError with the status as its code, so log lines that print an error's domain
+    // and code still show the status.
+    static var errorDomain: String { "OpenClickyAnswerHTTP" }
+    var errorCode: Int { status }
+    var errorUserInfo: [String: Any] { [NSLocalizedDescriptionKey: errorDescription ?? ""] }
+}
+
 /// Claude API helper with streaming for progressive text display.
 class ClaudeAPI {
     private static let tlsWarmupLock = NSLock()
     private static var hasStartedTLSWarmup = false
 
-    /// The /chat URL, read for every request so a backend changed in shell.json while the app runs
-    /// is used by the next question (it was fixed when the client was built).
-    private let currentProxyURL: () -> String
-    var apiURL: URL { Self.resolvedAPIURL(fromProxyURL: currentProxyURL()) }
     var model: String
 
     /// The NSError code (domain "ClaudeAPI") for an `error` event inside a stream that had started.
     static let midStreamErrorCode = -1002
     private let session: URLSession
 
-    /// `proxyURL` is built from the user-configurable backend URL (shell.json or an environment
-    /// override), not a compile-time literal, so a malformed value falls back to the hosted
-    /// backend's own /chat endpoint instead of crashing the app. That fallback string is a literal
-    /// built from a known-good constant, so force-unwrapping it is safe. Pulled out as a pure static
-    /// function so the fallback behavior can be unit tested without constructing a full ClaudeAPI
-    /// (whose init fires a background TLS warmup network request).
-    static func resolvedAPIURL(fromProxyURL proxyURL: String) -> URL {
-        URL(string: proxyURL) ?? URL(string: "\(OpenClickyConfiguration.hostedBackendURL)/chat")!
-    }
-
-    convenience init(proxyURL: String, model: String = "claude-sonnet-4-6") {
-        self.init(currentProxyURL: { proxyURL }, model: model)
-    }
-
-    init(currentProxyURL: @escaping () -> String, model: String = "claude-sonnet-4-6") {
-        self.currentProxyURL = currentProxyURL
+    init(model: String = "claude-sonnet-4-6") {
         self.model = model
 
         // Use .default instead of .ephemeral so TLS session tickets are cached.
@@ -56,68 +52,26 @@ class ClaudeAPI {
         warmUpTLSConnectionIfNeeded()
     }
 
-    /// The person's own Anthropic key goes straight to Anthropic with the same Messages body /chat
-    /// relays; without one, the backend's /chat on the account's token (`ProviderRouter`).
-    /// `goesToBackend` says the request carries the account's token, so a 401 is the sign-in's
-    /// and goes through `BackendSignIn` (refresh once, send again).
-    private func makeAPIRequest() throws -> (request: URLRequest, goesToBackend: Bool) {
+    /// The person's own Anthropic key goes straight to Anthropic. Every other source answers through
+    /// its AnswerProvider, before a request is built.
+    private func makeAPIRequest() throws -> URLRequest {
         var request: URLRequest
-        let goesToBackend: Bool
         switch ProviderRouter.current(for: .claude) {
         case .anthropicDirect:
             guard let anthropicKey = ProviderRouter.currentCredentials().anthropicKey else {
                 throw ProviderRouteUnavailable(capability: .claude, sentence: ProviderRouter.needsAnthropicKeySentence)
             }
             request = DirectProviderRequests.anthropicMessages(key: anthropicKey)
-            goesToBackend = false
         case .unavailable(let sentence):
             throw ProviderRouteUnavailable(capability: .claude, sentence: sentence)
         case .answerProvider(let source):
             // analyzeImageStreaming hands these to an AnswerProvider before building a request.
             throw ProviderRouteUnavailable(capability: .claude, sentence: "\(source.displayName) answers through its own provider")
-        case .backend, .openAIDirect:
-            request = URLRequest(url: apiURL)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            OpenClickyConfiguration.authorize(&request)
-            goesToBackend = true
+        case .openAIDirect:
+            throw ProviderRouteUnavailable(capability: .claude, sentence: ProviderRouter.needsAnthropicKeySentence)
         }
         request.timeoutInterval = 120
-        return (request, goesToBackend)
-    }
-
-    /// The start of a streamed answer: the byte stream of a 2xx answer, or a refusal whose body has
-    /// been read to the end (BackendSignIn needs a 401's body to tell the sign-in's from an own key's).
-    private enum StreamingAnswerStart {
-        case streaming(URLSession.AsyncBytes, status: Int)
-        case refused(status: Int, body: Data)
-
-        var statusAndBody: (status: Int, body: Data) {
-            switch self {
-            case .streaming(_, let status): return (status, Data())
-            case .refused(let status, let body): return (status, body)
-            }
-        }
-    }
-
-    private static func startStreamingAnswer(_ request: URLRequest, session: URLSession) async throws -> StreamingAnswerStart {
-        let (byteStream, response) = try await session.bytes(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw NSError(
-                domain: "ClaudeAPI",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Invalid HTTP response"]
-            )
-        }
-        // If non-2xx status, read the full body as error text
-        guard (200...299).contains(httpResponse.statusCode) else {
-            var errorBodyChunks: [String] = []
-            for try await line in byteStream.lines {
-                errorBodyChunks.append(line)
-            }
-            return .refused(status: httpResponse.statusCode, body: Data(errorBodyChunks.joined(separator: "\n").utf8))
-        }
-        return .streaming(byteStream, status: httpResponse.statusCode)
+        return request
     }
 
     /// Detects the MIME type of image data by inspecting the first bytes.
@@ -149,8 +103,9 @@ class ClaudeAPI {
 
         guard shouldStartTLSWarmup else { return }
 
-        // Warm the host the next question will go to: Anthropic on an own key, else the backend.
-        let warmupTarget = ProviderRouter.currentCredentials().anthropicKey != nil ? URL(string: DirectProviderRequests.anthropicMessagesURL)! : apiURL
+        // Only an own Anthropic key talks to Anthropic from here; the other sources warm nothing.
+        guard ProviderRouter.currentCredentials().anthropicKey != nil else { return }
+        let warmupTarget = URL(string: DirectProviderRequests.anthropicMessagesURL)!
         guard var warmupURLComponents = URLComponents(url: warmupTarget, resolvingAgainstBaseURL: false) else {
             return
         }
@@ -195,9 +150,7 @@ class ClaudeAPI {
             return (text: result.text, toolCalls: result.toolCalls, duration: Date().timeIntervalSince(startTime))
         }
 
-        let apiRequest = try makeAPIRequest()
-        var request = apiRequest.request
-        let goesToBackend = apiRequest.goesToBackend
+        var request = try makeAPIRequest()
 
         // Build messages array
         var messages: [[String: Any]] = []
@@ -243,19 +196,22 @@ class ClaudeAPI {
         let payloadMB = Double(bodyData.count) / 1_048_576.0
         print("🌐 Claude streaming request: \(String(format: "%.1f", payloadMB))MB, \(images.count) image(s)")
 
-        // Use bytes streaming for SSE (Server-Sent Events). On the account's token a refused
-        // sign-in is renewed once and the question sent again, like every other backend call.
-        let session = self.session
-        let streamingAnswerStart = goesToBackend
-            ? try await BackendSignIn.send(request, using: { try await Self.startStreamingAnswer($0, session: session) },
-                                           readingStatusAndBodyWith: { $0.statusAndBody })
-            : try await Self.startStreamingAnswer(request, session: session)
-        let byteStream: URLSession.AsyncBytes
-        switch streamingAnswerStart {
-        case .streaming(let answerByteStream, _):
-            byteStream = answerByteStream
-        case .refused(let status, let body):
-            throw BackendHTTPError(service: .answers, status: status, body: body)
+        // Use bytes streaming for SSE (Server-Sent Events).
+        let (byteStream, response) = try await session.bytes(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NSError(
+                domain: "ClaudeAPI",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Invalid HTTP response"]
+            )
+        }
+        // If non-2xx status, read the full body as error text
+        guard (200...299).contains(httpResponse.statusCode) else {
+            var errorBodyChunks: [String] = []
+            for try await line in byteStream.lines {
+                errorBodyChunks.append(line)
+            }
+            throw AnswerHTTPError(status: httpResponse.statusCode, body: Data(errorBodyChunks.joined(separator: "\n").utf8))
         }
 
         // Parse SSE stream — each event is "data: {json}\n\n"
@@ -309,6 +265,14 @@ class ClaudeAPI {
     /// Gemini, a Claude Code or Codex plan). The pieces come through a stream this call reads to the
     /// end, in order; each is handed on as the whole answer so far, like the Anthropic path.
     /// Cancelling the question cancels the provider (a CLI process is ended).
+    /// Whether any of an answer has reached the voice: past that, starting again would repeat it.
+    @MainActor private final class AnswerProgress {
+        var hasStarted = false
+    }
+
+    /// Asks `source`. If it refuses because the plan has run out and nothing has been said yet, the
+    /// backup plan answers the same question, once. Said already: the refusal stands, and the backup
+    /// takes the next question.
     private func answerThroughProvider(
         source: AnswerSource,
         images: [(data: Data, label: String)],
@@ -317,6 +281,38 @@ class ClaudeAPI {
         userPrompt: String,
         tools: [[String: Any]],
         maxTokens: Int,
+        onTextChunk: @MainActor @Sendable (String) -> Void
+    ) async throws -> AnswerResult {
+        let progress = AnswerProgress()
+        do {
+            return try await askProvider(
+                source: source, images: images, systemPrompt: systemPrompt, conversationHistory: conversationHistory,
+                userPrompt: userPrompt, tools: tools, maxTokens: maxTokens, progress: progress, onTextChunk: onTextChunk)
+        } catch let refusal as AnswerProviderError where refusal.isPlanLimit {
+            await PlanLimitStore.shared.noteLimitHit(source)
+            guard !progress.hasStarted, let backup = ProviderRouter.currentCredentials().activeAnswerSource,
+                  backup != source, backup == .claudeCodePlan || backup == .codexPlan else { throw refusal }
+            OpenClickyConfiguration.showNotice?("\(source.shortName) hit its limit. \(backup.shortName) is answering for now.")
+            do {
+                return try await askProvider(
+                    source: backup, images: images, systemPrompt: systemPrompt, conversationHistory: conversationHistory,
+                    userPrompt: userPrompt, tools: tools, maxTokens: maxTokens, progress: progress, onTextChunk: onTextChunk)
+            } catch let secondRefusal as AnswerProviderError where secondRefusal.isPlanLimit {
+                await PlanLimitStore.shared.noteLimitHit(backup)
+                throw secondRefusal
+            }
+        }
+    }
+
+    private func askProvider(
+        source: AnswerSource,
+        images: [(data: Data, label: String)],
+        systemPrompt: String,
+        conversationHistory: [(userPlaceholder: String, assistantResponse: String)],
+        userPrompt: String,
+        tools: [[String: Any]],
+        maxTokens: Int,
+        progress: AnswerProgress,
         onTextChunk: @MainActor @Sendable (String) -> Void
     ) async throws -> AnswerResult {
         let provider = try await AnswerProviderFactory.make(for: source, credentials: ProviderRouter.currentCredentials(),
@@ -337,6 +333,7 @@ class ClaudeAPI {
             var answerSoFar = ""
             for await piece in pieces {
                 answerSoFar += piece
+                progress.hasStarted = true
                 await onTextChunk(answerSoFar)
             }
             return try await answerTask.value
@@ -367,9 +364,7 @@ class ClaudeAPI {
             return (text: result.text, duration: Date().timeIntervalSince(startTime))
         }
 
-        let apiRequest = try makeAPIRequest()
-        var request = apiRequest.request
-        let goesToBackend = apiRequest.goesToBackend
+        var request = try makeAPIRequest()
 
         var messages: [[String: Any]] = []
         for (userPlaceholder, assistantResponse) in conversationHistory {
@@ -411,9 +406,7 @@ class ClaudeAPI {
         let payloadMB = Double(bodyData.count) / 1_048_576.0
         print("🌐 Claude request: \(String(format: "%.1f", payloadMB))MB, \(images.count) image(s)")
 
-        let (data, response) = goesToBackend
-            ? try await BackendSignIn.send(request) { [session] in try await session.data(for: $0) }
-            : try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw NSError(
@@ -423,7 +416,7 @@ class ClaudeAPI {
             )
         }
         guard (200...299).contains(httpResponse.statusCode) else {
-            throw BackendHTTPError(service: .answers, status: httpResponse.statusCode, body: data)
+            throw AnswerHTTPError(status: httpResponse.statusCode, body: data)
         }
 
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]

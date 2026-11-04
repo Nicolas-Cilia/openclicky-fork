@@ -17,14 +17,13 @@ public enum AnswerSource
     Xai,
     ClaudeCodePlan,
     CodexPlan,
-    OpenClickyAccount,
 }
 
 public static class AnswerSources
 {
     public static IReadOnlyList<AnswerSource> AllCases { get; } = Enum.GetValues<AnswerSource>();
 
-    /// <summary>shell.json's `answerSource` value: "anthropic", "openAI", … "openClickyAccount".</summary>
+    /// <summary>shell.json's `answerSource` value: "anthropic", "openAI", … "codexPlan".</summary>
     public static string Id(this AnswerSource source) => source.RawValue();
 
     /// <summary>Swift's `AnswerSource(rawValue:)`.</summary>
@@ -42,7 +41,6 @@ public static class AnswerSources
         AnswerSource.Xai => "Grok",
         AnswerSource.ClaudeCodePlan => "Claude Code",
         AnswerSource.CodexPlan => "Codex",
-        AnswerSource.OpenClickyAccount => "free credits",
         _ => source.ToString(),
     };
 
@@ -57,7 +55,6 @@ public static class AnswerSources
         AnswerSource.Xai => "xAI (Grok)",
         AnswerSource.ClaudeCodePlan => "Claude Code (your Claude plan)",
         AnswerSource.CodexPlan => "Codex (your ChatGPT plan)",
-        AnswerSource.OpenClickyAccount => "OpenClicky free credits",
         _ => source.ToString(),
     };
 
@@ -71,7 +68,7 @@ public static class AnswerSources
         AnswerSource.Groq => "meta-llama/llama-4-scout-17b-16e-instruct",
         AnswerSource.Mistral => "mistral-medium-latest",
         AnswerSource.Xai => "grok-4",
-        _ => null, // the CLI's or backend's own
+        _ => null, // the CLI's own
     };
 
     /// <summary>The OpenAI-compatible chat completions endpoint, for the sources that speak it.</summary>

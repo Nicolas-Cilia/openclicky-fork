@@ -52,7 +52,6 @@ internal sealed partial class SettingsRowFactory(MainWindowServices services, IM
             ?? PluginsRow(item, query)
             ?? KeyboardRow(item, query)
             ?? KeysRow(item, query)
-            ?? AccountRow(item, query)
             ?? PrivacyRow(item, query)
             ?? AboutRow(item, query)
             ?? IslandRow(item, query)

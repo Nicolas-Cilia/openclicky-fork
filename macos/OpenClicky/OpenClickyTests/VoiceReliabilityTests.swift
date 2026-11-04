@@ -31,7 +31,7 @@ struct RealtimeConnectionRuleTests {
         #expect(RealtimeVoiceClient.needsPing(lastServerEventAt: nil, now: now))
     }
 
-    /// Every session is minted by the backend and billed, so the keep-warm loop reconnects in the
+    /// Every session is minted and billed, so the keep-warm loop reconnects in the
     /// background only while OpenClicky is actually being used.
     @Test func keepWarmReconnectsOnlyWhileRecentlyUsed() {
         let now = Date()
@@ -67,15 +67,15 @@ struct RealtimeConnectionRuleTests {
         #expect(RealtimeVoiceClient.handshakeFailureDescription(statusCode: nil, underlyingError: "offline") == "offline")
     }
 
-    /// The backend's own error text, with the status, rather than a raw JSON body.
+    /// OpenAI's own error text, with the status, rather than a raw JSON body.
     @Test func aBackendRefusalUsesTheBackendsOwnWords() {
         let body = Data(#"{"error":"invalid OpenAI key"}"#.utf8)
-        let description = RealtimeVoiceClient.backendRefusalDescription(statusCode: 401, body: body)
+        let description = RealtimeVoiceClient.refusalDescription(statusCode: 401, body: body)
         #expect(description.contains("invalid OpenAI key"))
         #expect(description.contains("401"))
         #expect(!description.contains("{"))
         let nested = Data(#"{"error":{"message":"quota exceeded"}}"#.utf8)
-        #expect(RealtimeVoiceClient.backendRefusalDescription(statusCode: 500, body: nested).contains("quota exceeded"))
+        #expect(RealtimeVoiceClient.refusalDescription(statusCode: 500, body: nested).contains("quota exceeded"))
     }
 }
 
@@ -149,9 +149,6 @@ struct SettingsFileReloadTests {
         #expect(OpenClickyConfiguration.credentialFingerprint(of: settings) == original)
         settings.openaiApiKey = "sk-new"
         #expect(OpenClickyConfiguration.credentialFingerprint(of: settings) != original)
-        var tokenChanged = OpenClickyShellSettings()
-        tokenChanged.token = "new-token"
-        #expect(OpenClickyConfiguration.credentialFingerprint(of: tokenChanged) != original)
         // A Gemini key or a fast voice pick can move realtime to another vendor.
         var geminiAdded = OpenClickyShellSettings()
         geminiAdded.geminiApiKey = "g"

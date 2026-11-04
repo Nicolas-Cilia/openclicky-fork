@@ -11,8 +11,7 @@
 //  It also writes the lessons the app starts itself (TeacherPlugin.StartLesson), so it has to
 //  work without OpenAI too, since most people have no key: an Anthropic key gets Claude Sonnet 5.5
 //  with thinking off (3-4 s and the clearest drawings of those measured; Haiku 4.5 overlapped
-//  its labels), a free account gets the backend's /chat (which keeps the request for no thinking
-//  in the form its model accepts), and another API key its own provider. Plans (the Claude Code
+//  its labels), and another API key its own provider. Plans (the Claude Code
 //  and Codex CLIs) take 15 s or more to start, so they never start a lesson early.
 //
 
@@ -28,7 +27,7 @@ public static class TeacherSketchWriter
 {
     public const string OpenAIModel = "gpt-5.5";
     public const string AnthropicModel = "claude-sonnet-5-5";
-    /// <summary>The output a lesson needs: 25 commands is 400-700 tokens. The backend caps an account at this.</summary>
+    /// <summary>The output a lesson needs: 25 commands is 400-700 tokens. </summary>
     public const int MaximumOutputTokens = 1024;
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
 
@@ -37,8 +36,6 @@ public static class TeacherSketchWriter
     {
         public sealed record OpenAI(string Key) : Route;
         public sealed record Anthropic(string Key) : Route;
-        /// <summary>The free account: the backend's /chat on the account token.</summary>
-        public sealed record Account : Route;
         /// <summary>Another API key the ask lane answers with (OpenRouter, Gemini, Groq, Mistral, xAI).</summary>
         public sealed record AnswerSourceRoute(AnswerSource Source) : Route;
     }
@@ -48,9 +45,7 @@ public static class TeacherSketchWriter
     {
         if (credentials.OpenAIKey is { } openAIKey) return new Route.OpenAI(openAIKey);
         if (credentials.AnthropicKey is { } anthropicKey) return new Route.Anthropic(anthropicKey);
-        if (credentials.AccountToken is not null) return new Route.Account();
-        var fastSources = credentials.AnswerSourcesInOrder.Where(source => source is not (AnswerSource.ClaudeCodePlan or AnswerSource.CodexPlan
-            or AnswerSource.OpenClickyAccount or AnswerSource.Anthropic or AnswerSource.OpenAI));
+        var fastSources = credentials.AnswerSourcesInOrder.Where(source => source is not (AnswerSource.ClaudeCodePlan or AnswerSource.CodexPlan or AnswerSource.Anthropic or AnswerSource.OpenAI));
         return fastSources.Select(source => (Route?)new Route.AnswerSourceRoute(source)).FirstOrDefault();
     }
 
@@ -108,28 +103,17 @@ public static class TeacherSketchWriter
             {
                 case Route.OpenAI openAI:
                     reply = await SendAsync(DirectProviderRequests.OpenAIChatCompletions(openAI.Key, OpenAIBody(userPrompt, screenshotJpeg)),
-                        goesToBackend: false, ChatCompletionText, timeout.Token);
+                        ChatCompletionText, timeout.Token);
                     break;
                 case Route.Anthropic anthropic:
                     reply = await SendAsync(DirectProviderRequests.AnthropicMessages(anthropic.Key, ClaudeBody(userPrompt, screenshotJpeg)),
-                        goesToBackend: false, DirectProviderRequests.AnthropicReplyText, timeout.Token);
+                        DirectProviderRequests.AnthropicReplyText, timeout.Token);
                     break;
-                case Route.Account:
-                {
-                    var request = new HttpRequestMessage(HttpMethod.Post, $"{OpenClickyConfiguration.BackendBaseUrl}/chat")
-                    {
-                        Content = DirectProviderRequests.JsonContent(ClaudeBody(userPrompt, screenshotJpeg)),
-                    };
-                    OpenClickyConfiguration.Authorize(request);
-                    // Null at max_tokens: half a drawing is not drawn.
-                    reply = await SendAsync(request, goesToBackend: true, DirectProviderRequests.AnthropicReplyText, timeout.Token);
-                    break;
-                }
                 default:
                 {
                     // ClaudeAPI hands these to the source's answer provider (1,024 tokens); a plan is slow but
                     // still draws what the Realtime lane described.
-                    var answers = new ClaudeAPI(() => $"{OpenClickyConfiguration.BackendBaseUrl}/chat");
+                    var answers = new ClaudeAPI();
                     IReadOnlyList<(byte[] Data, string Label)> images = screenshotJpeg is null ? [] : [(screenshotJpeg, "the student's screen")];
                     var (text, _) = await answers.AnalyzeImageAsync(images, SystemPrompt, null, userPrompt, timeout.Token);
                     reply = string.IsNullOrWhiteSpace(text) ? null : text;
@@ -146,13 +130,11 @@ public static class TeacherSketchWriter
         return reply;
     }
 
-    private static async Task<string?> SendAsync(HttpRequestMessage request, bool goesToBackend, Func<byte[], string?> readReply, CancellationToken cancellationToken)
+    private static async Task<string?> SendAsync(HttpRequestMessage request, Func<byte[], string?> readReply, CancellationToken cancellationToken)
     {
         using (request)
         {
-            using var response = goesToBackend
-                ? await BackendSignIn.SendAsync(request, sent => HttpClients.Shared.SendAsync(sent, cancellationToken))
-                : await HttpClients.Shared.SendAsync(request, cancellationToken);
+            using var response = await HttpClients.Shared.SendAsync(request, cancellationToken);
             if ((int)response.StatusCode != 200)
             {
                 AppLog.Write($"teacher: sketch writer refused ({(int)response.StatusCode})");
@@ -166,14 +148,12 @@ public static class TeacherSketchWriter
     {
         Route.OpenAI => $"openai {OpenAIModel}",
         Route.Anthropic => $"anthropic {AnthropicModel}",
-        Route.Account => "the account",
         Route.AnswerSourceRoute answerSource => answerSource.Source.RawValue(),
         _ => "the answer source",
     };
 
     /// <summary>The Messages body for a lesson. Thinking is turned off: Sonnet 5.5 thinks by default and spent the whole
-    /// budget before writing a stroke (it takes "between_tools", not "disabled"). On the account the backend picks the
-    /// model and maps this to what that model accepts.</summary>
+    /// budget before writing a stroke (it takes "between_tools", not "disabled").</summary>
     public static JsonObject ClaudeBody(string userPrompt, byte[]? screenshotJpeg)
     {
         var content = new JsonArray();

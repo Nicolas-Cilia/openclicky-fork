@@ -98,11 +98,11 @@ final class UITour {
             await shootWindow(named: String(format: "window-%@-%02d-%@", appearanceName, index, section.rawValue), window: mainWindow, scrolls: scrolls)
         }
         if scrolls, let window = mainWindow {
-            // The Keys & Account page at the window's narrowest: its "Add a key" row is the widest
+            // The Keys & Plans page at the window's narrowest: its "Add a key" row is the widest
             // there is, and the reason for the minimum width.
             let fullFrame = window.frame
             window.setContentSize(DictationWindowController.minimumSize)
-            companionManager.showSettings(.account)
+            companionManager.showSettings(.keys)
             await shoot("window-\(appearanceName)-00-keys-narrow", window: window)
             window.setFrame(fullFrame, display: true)
         }
@@ -138,7 +138,6 @@ final class UITour {
             ("04-dictate-nothing", .dictate, "didn’t catch any words. try again, or pick another microphone.", false),
             ("05-talk", .talk, nil, false),
             ("06-act", .act, nil, false),
-            ("06b-account", .account, nil, false),
             ("07-done", .done, nil, false),
             ("08-open-at-login", .openAtLogin, nil, false),
             ("09-open-at-login-on", .openAtLogin, "✓ done. i’ll be here whenever your mac starts.", true),

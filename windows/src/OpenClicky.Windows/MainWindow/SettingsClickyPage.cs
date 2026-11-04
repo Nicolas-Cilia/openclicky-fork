@@ -73,7 +73,21 @@ internal sealed partial class SettingsRowFactory
             OpenClickyConfiguration.Update(shell => shell.AnswerSource = choice == "auto" ? null : choice);
             ShellSettingsRevision.NoteChanged();
         }, 220);
-        return Ui.Row(item.Title, $"Now: {AccountRows.NowAnswering(credentials)}", query, picker);
+        return Ui.Row(item.Title, $"Now: {PlanRows.NowAnswering(credentials)}", query, picker);
+    }
+
+    /// <summary>Which plan takes over when the default runs out. Only plans are offered: a key is never used without someone choosing it.</summary>
+    private static Grid BackupSourceRow(SettingsItem item, string query)
+    {
+        var credentials = ProviderCredentials.Current();
+        var options = new List<(string Id, string Title)> { ("auto", "Use the other plan"), (ProviderCredentials.NoBackup, "Don’t switch") };
+        options.AddRange(new[] { AnswerSource.ClaudeCodePlan, AnswerSource.CodexPlan }.Where(credentials.CanAnswer).Select(source => (source.Id(), source.DisplayName())));
+        var picker = Ui.Picker(options, OpenClickyConfiguration.Settings.BackupAnswerSource ?? "auto", choice =>
+        {
+            OpenClickyConfiguration.Update(shell => shell.BackupAnswerSource = choice == "auto" ? null : choice);
+            ShellSettingsRevision.NoteChanged();
+        }, 220);
+        return Ui.Row(item.Title, PlanRows.BackupDetail(credentials), query, picker);
     }
 
     private void ChooseWorkspaceFolder()
@@ -134,7 +148,7 @@ internal sealed partial class SettingsRowFactory
                         companion.RealtimeProviderChanged();
                     }, 170))), Changes.Shell);
             case "clicky.fastVoiceNeedsKey":
-                return Ui.Card(Ui.Row(item.Title, item.Detail, query, Ui.Button("Add Key…", () => actions.ShowSettings(DictationSettingsPage.Account))));
+                return Ui.Card(Ui.Row(item.Title, item.Detail, query, Ui.Button("Add Key…", () => actions.ShowSettings(DictationSettingsPage.Keys))));
             default:
                 return null;
         }
@@ -143,7 +157,7 @@ internal sealed partial class SettingsRowFactory
     /// <summary>
     /// Who speaks the answers: Automatic, every voice there is a key or an account for, Kokoro and
     /// this PC; the line under it names who speaks now. Kokoro and this PC's voice each get their own
-    /// rows under it, and "More voices" points at Keys & Account.
+    /// rows under it, and "More voices" points at Keys & Plans.
     /// </summary>
     private StackPanel SpeechVoiceRows(SettingsItem item, string query)
     {
@@ -163,8 +177,8 @@ internal sealed partial class SettingsRowFactory
             var vendors = Settings.Region.OffersIndianOptions()
                 ? "OpenAI, ElevenLabs, Gemini, Google Cloud, Amazon Polly or Sarvam"
                 : "OpenAI, ElevenLabs, Gemini, Google Cloud or Amazon Polly";
-            stack.Children.Add(Ui.Card(Ui.Row("More voices", $"Add an {vendors} key under Keys & Account, and its voice shows up here.", query,
-                Ui.Button("Add a Key…", () => actions.ShowSettings(DictationSettingsPage.Account)))));
+            stack.Children.Add(Ui.Card(Ui.Row("More voices", $"Add an {vendors} key under Keys & Plans, and its voice shows up here.", query,
+                Ui.Button("Add a Key…", () => actions.ShowSettings(DictationSettingsPage.Keys)))));
         }
         return stack;
     }

@@ -2,7 +2,7 @@
 //  AnswerProvider.swift
 //  OpenClicky
 //
-//  Who can answer a question besides Anthropic and the OpenClicky backend. The ask lane, screen
+//  Who can answer a question besides Anthropic on an own key. The ask lane, screen
 //  grounding and the tour's demo all go through `ClaudeAPI.analyzeImageStreaming`; when
 //  ProviderRouter picks one of these sources, ClaudeAPI hands the same request to an
 //  `AnswerProvider`:
@@ -10,14 +10,14 @@
 //    - Google Gemini (GeminiAnswerProvider)
 //    - the Claude Code CLI on the person's Claude plan (ClaudeCodeAnswerProvider)
 //    - Codex on the person's ChatGPT plan (CodexAnswerProvider)
-//  Keys go straight to their vendor; nothing here talks to the OpenClicky backend.
+//  Keys go straight to their vendor.
 //
 
 import Foundation
 
 /// The services that can answer, as the router and Settings name them.
 nonisolated enum AnswerSource: String, CaseIterable, Identifiable, Sendable {
-    case anthropic, openAI, openRouter, gemini, groq, mistral, xai, claudeCodePlan, codexPlan, openClickyAccount
+    case anthropic, openAI, openRouter, gemini, groq, mistral, xai, claudeCodePlan, codexPlan
 
     var id: String { rawValue }
 
@@ -33,7 +33,6 @@ nonisolated enum AnswerSource: String, CaseIterable, Identifiable, Sendable {
         case .xai: return "Grok"
         case .claudeCodePlan: return "Claude Code"
         case .codexPlan: return "Codex"
-        case .openClickyAccount: return "free credits"
         }
     }
 
@@ -48,7 +47,6 @@ nonisolated enum AnswerSource: String, CaseIterable, Identifiable, Sendable {
         case .xai: return "xAI (Grok)"
         case .claudeCodePlan: return "Claude Code (your Claude plan)"
         case .codexPlan: return "Codex (your ChatGPT plan)"
-        case .openClickyAccount: return "OpenClicky free credits"
         }
     }
 
@@ -62,7 +60,7 @@ nonisolated enum AnswerSource: String, CaseIterable, Identifiable, Sendable {
         case .groq: return "meta-llama/llama-4-scout-17b-16e-instruct"
         case .mistral: return "mistral-medium-latest"
         case .xai: return "grok-4"
-        case .claudeCodePlan, .codexPlan, .openClickyAccount: return nil // the CLI's or backend's own
+        case .claudeCodePlan, .codexPlan: return nil // the CLI's own
         }
     }
 
@@ -125,4 +123,6 @@ nonisolated struct AnswerProviderError: LocalizedError, Equatable {
     let status: Int
     let message: String
     var errorDescription: String? { "\(source.displayName): \(message)" }
+    /// A plan refused because it has run out, the one failure another plan can answer for.
+    var isPlanLimit: Bool { (source == .claudeCodePlan || source == .codexPlan) && PlanLimitText.matches(message) }
 }

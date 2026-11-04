@@ -3,7 +3,7 @@
 //  OpenClicky
 //
 //  OpenClicky's one window. A native sidebar lists six pages, with no heading: Dictation, Clicky,
-//  Island, Keys & Account, Privacy, General. Rows on a page open the pages under it (Your words,
+//  Island, Keys & Plans, Privacy, General. Rows on a page open the pages under it (Your words,
 //  How it writes and The orb under Dictation; Calendars under Island), and the toolbar's back
 //  button returns. Every page is drawn the same native way, a search field filters every setting,
 //  and incognito and the account sit at the sidebar's foot. Every way in (⌘,, the menu
@@ -131,7 +131,7 @@ final class DictationWindowController: NSWindowController, NSWindowDelegate {
     required init?(coder: NSCoder) { nil }
 
     /// The sidebar (240 pt) plus 540 pt for a page. Every page is a grouped form that reflows, so
-    /// the widest fixed row decides: Keys & Account's "Add a key" (provider menu, 130 pt key field, Add)
+    /// the widest fixed row decides: Keys & Plans' "Add a key" (provider menu, 130 pt key field, Add)
     /// still leaves its title a readable column at 540 pt and squeezes it to one letter a line by
     /// 480 pt. Narrower windows also let the split view push the sidebar off its edge.
     static let minimumSize = NSSize(width: 780, height: 560)
@@ -187,9 +187,8 @@ struct DictationRootView: View {
     let companionManager: CompanionManager
     @ObservedObject private var settings: DictationSettings
     @ObservedObject private var spaceStore: DictationSpaceStore
-    // Observed so rows whose relevance depends on them (the fn banner, the sign-in rows) refresh.
+    // Observed so rows whose relevance depends on them (the fn banner, the key rows) refresh.
     @ObservedObject private var fnKeyState = FnKeyState.shared
-    @ObservedObject private var authSession = OpenClickyAuthSession.shared
     @ObservedObject private var shellSettingsRevision = ShellSettingsRevision.shared
 
     init(model: DictationWindowModel, companionManager: CompanionManager) {
@@ -309,12 +308,11 @@ struct SidebarIconLabel: View {
     }
 }
 
-/// The sidebar's foot: incognito, and who is signed in (a click opens Account).
+/// The sidebar's foot: incognito.
 private struct SidebarFooter: View {
     @ObservedObject var settings: DictationSettings
     let companionManager: CompanionManager
     @ObservedObject var model: DictationWindowModel
-    @ObservedObject private var authSession = OpenClickyAuthSession.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -327,39 +325,6 @@ private struct SidebarFooter: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .help(settings.incognito ? "Incognito is on: takes paste but are not saved." : "Incognito is off: takes are saved to history on this Mac.")
-            Divider()
-            Button(action: { model.select(.settings(.account)) }) {
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle().fill(authSession.accountEmail == nil ? Color(nsColor: .tertiaryLabelColor) : SettingsLook.accent)
-                        Text(accountInitial).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
-                    }
-                    .frame(width: 28, height: 28)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(accountName).font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.tail)
-                        Text(authSession.accountEmail != nil ? "Signed in" : (authSession.isGuestWithoutEmail ? "Trying it free" : "Personal · no account"))
-                            .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Account")
-            .pointerCursor()
         }
     }
-
-    /// "Prasanth S." — the first name and the initial of the last, or the signed-in address's name.
-    private var accountName: String {
-        if let email = authSession.accountEmail { return String(email.split(separator: "@").first ?? "") }
-        let nameParts = NSFullUserName().split(separator: " ")
-        guard let firstName = nameParts.first else { return "You" }
-        if nameParts.count > 1, let lastInitial = nameParts.last?.first { return "\(firstName) \(lastInitial)." }
-        return String(firstName)
-    }
-
-    private var accountInitial: String { String(accountName.prefix(1)).uppercased() }
 }

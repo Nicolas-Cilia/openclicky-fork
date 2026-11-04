@@ -346,7 +346,7 @@ public sealed class OpenAIChatAnswerProvider(AnswerSource source, string apiKey,
         {
             // OpenRouter's app attribution: optional, but it is how the requests show up as
             // OpenClicky's on their side instead of as an unnamed client.
-            httpRequest.SetHeader("HTTP-Referer", "https://github.com/prasanthsasikumar/openclicky");
+            httpRequest.SetHeader("HTTP-Referer", "https://github.com/Nicolas-Cilia/openclicky-fork");
             httpRequest.SetHeader("X-Title", "OpenClicky");
         }
         return httpRequest;

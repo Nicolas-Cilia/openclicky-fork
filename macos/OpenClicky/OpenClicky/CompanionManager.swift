@@ -10,7 +10,6 @@
 import AVFoundation
 import Combine
 import Foundation
-import PostHog
 import ScreenCaptureKit
 import SwiftUI
 
@@ -44,7 +43,7 @@ final class CompanionManager: ObservableObject {
         }
     }
     @Published private(set) var lastTranscript: String?
-    /// Who is answering the question being spoken ("Claude Code", "free credits"), for the island.
+    /// Who is answering the question being spoken ("Claude Code", "Codex"), for the island.
     @Published private(set) var answeringSourceName: String?
     @Published private(set) var currentAudioPowerLevel: CGFloat = 0
     @Published private(set) var hasAccessibilityPermission = false
@@ -111,7 +110,7 @@ final class CompanionManager: ObservableObject {
     // MARK: - Realtime voice (OpenClicky fast lane)
 
     /// Speech-to-speech over OpenAI Realtime instead of transcribe → Claude → TTS. On by default
-    /// when a backend token exists; falls back to the classic lane if the session cannot open.
+    /// with an own OpenAI or Gemini key; falls back to the classic lane if the session cannot open.
     @Published var isRealtimeVoiceEnabled: Bool = UserDefaults.standard.object(forKey: "isOpenClickyRealtimeVoiceEnabled") == nil
         ? true
         : UserDefaults.standard.bool(forKey: "isOpenClickyRealtimeVoiceEnabled")
@@ -159,9 +158,26 @@ final class CompanionManager: ObservableObject {
     func setHUDPlacement(_ placement: HUDPlacement) {
         hudPlacement = placement
         UserDefaults.standard.set(placement.rawValue, forKey: HUDPlacement.defaultsKey)
-        notchHUDManager.setPlacement(placement)
+        applyHUDPlacement()
         // With the island hidden the menu bar icon is the way into the panel and the window.
         if placement == .hidden { setMenuBarIconVisible(true) }
+    }
+
+    private let notchOccupancyWatcher = NotchOccupancyWatcher()
+
+    /// Puts the island where the pick says. Automatic watches for another app in the notch, and the
+    /// island moves out of its way and back; the other picks stay where they were put.
+    func applyHUDPlacement() {
+        guard hudPlacement == .automatic else {
+            notchOccupancyWatcher.stop()
+            notchHUDManager.setPlacement(hudPlacement)
+            return
+        }
+        notchOccupancyWatcher.start { [weak self] occupied in
+            AppLog.append("island: another app \(occupied ? "is using" : "left") the notch")
+            self?.notchHUDManager.setPlacement(HUDPlacement.automatic.resolved(notchIsOccupied: occupied))
+        }
+        notchHUDManager.setPlacement(HUDPlacement.automatic.resolved(notchIsOccupied: notchOccupancyWatcher.isOccupied))
     }
 
     #if DEBUG
@@ -202,7 +218,7 @@ final class CompanionManager: ObservableObject {
     private var didGreetRealtime = false
     private var didConfigureRealtimeCallbacks = false
 
-    private var usesRealtimeVoice: Bool { isRealtimeVoiceEnabled && OpenClickyConfiguration.isConfigured && AccountCapabilities.current().usesRealtime }
+    private var usesRealtimeVoice: Bool { isRealtimeVoiceEnabled && ProviderCapabilities.current().usesRealtime }
 
     func setRealtimeVoiceEnabled(_ enabled: Bool) {
         isRealtimeVoiceEnabled = enabled
@@ -501,9 +517,9 @@ final class CompanionManager: ObservableObject {
     func submitTextToAgent(_ text: String, threadId: String? = nil, startsNewThread: Bool = false) {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty, OpenClickyConfiguration.isConfigured else { return }
-        // An account has no agent: the backend would refuse it with not_on_plan, so say that plainly.
-        guard AccountCapabilities.current().usesAgent else {
-            speakWithSystemVoice(AccountLimitError.notOnPlan.message)
+        // Nothing can run the agent: say what would, rather than failing later.
+        guard ProviderCapabilities.current().usesAgent else {
+            speakWithSystemVoice(ProviderCapabilities.current().agentPausedSentence ?? Self.agentNeedsSetupSentence)
             return
         }
         interruptCurrentAnswer(includingAgentWork: true)
@@ -518,7 +534,7 @@ final class CompanionManager: ObservableObject {
             } catch {
                 print("⚠️ Agent follow-up error: \(error)")
                 agentActivityText = nil
-                speakCreditsErrorFallback()
+                speakAgentErrorFallback()
             }
             await waitForSystemVoiceNoticeToEnd()
             if !Task.isCancelled {
@@ -587,7 +603,6 @@ final class CompanionManager: ObservableObject {
         // A guide checks the click that finishes this step against it.
         guidedStepPointedLocation = location
         detectedElementPointToken &+= 1
-        ClickyAnalytics.trackElementPointed(elementLabel: trimmedLabel)
     }
 
     /// The prompt lines the switched-on plugins add to both voice lanes.
@@ -610,14 +625,12 @@ final class CompanionManager: ObservableObject {
         pointAt(screenshotPoint: pointCoordinate, label: parseResult.elementLabel, in: targetScreenCapture)
     }
 
-    // Both read the backend URL per request: built once from it, they kept asking the old
-    // backend after shell.json changed while everything else followed the new one.
     private lazy var claudeAPI: ClaudeAPI = {
-        return ClaudeAPI(currentProxyURL: { "\(OpenClickyConfiguration.backendBaseURL)/chat" }, model: selectedModel)
+        return ClaudeAPI(model: selectedModel)
     }()
 
     private lazy var answerVoicePlayer: AnswerVoicePlayer = {
-        return AnswerVoicePlayer(currentProxyURL: { "\(OpenClickyConfiguration.backendBaseURL)/tts" })
+        return AnswerVoicePlayer()
     }()
 
     /// Conversation history so Claude remembers prior exchanges within a session.
@@ -628,7 +641,6 @@ final class CompanionManager: ObservableObject {
     private var lastAskQuestion: (transcript: String, askedAt: Date)?
     /// Account notices (a limit, the free service's trouble) already spoken this session: each is
     /// said once, then the lane falls back silently.
-    private var spokenAccountNotices: Set<String> = []
 
     /// The question in flight was typed (the composer), not spoken: they may not be able to hear
     /// either, so the Teacher writes the answer down (`TeacherListening`).
@@ -836,10 +848,10 @@ final class CompanionManager: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: "hasCompletedOnboarding") }
     }
 
-    /// An account hears on the Mac (Apple speech); own keys keep the configured provider.
-    private func applyHearingForAccount() {
+    /// Without an own OpenAI key speech is heard on this Mac; with one, the configured provider.
+    private func applyHearing() {
         buddyDictationManager.replaceTranscriptionProvider(
-            AccountCapabilities.current().hearsOnDevice
+            ProviderCapabilities.current().hearsOnDevice
                 ? AppleSpeechTranscriptionProvider()
                 : BuddyTranscriptionProviderFactory.makeDefaultProvider()
         )
@@ -856,7 +868,7 @@ final class CompanionManager: ObservableObject {
         bindAudioPowerLevel()
         bindShortcutTransitions()
         bindAskDictationOutcome()
-        applyHearingForAccount()
+        applyHearing()
         // A key or token changed in shell.json: the open Realtime session was minted with the old
         // one, so replace it rather than keep using it until the next relaunch.
         OpenClickyConfiguration.startWatchingSettingsFile()
@@ -869,20 +881,14 @@ final class CompanionManager: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 AppLog.append("shell.json credentials changed; reconnecting realtime")
-                self.applyHearingForAccount()
+                self.applyHearing()
                 if self.usesRealtimeVoice { self.warmUpRealtimeVoice() }
                 // A key added or removed can move hands-free between fast voice and the standard lane.
                 if self.isAlwaysListening { self.setAlwaysListening(true) }
             }
         }
-        // The backend's /billing/me answer decides the account profile; it can arrive after launch.
-        NotificationCenter.default.addObserver(
-            forName: AccountProfileStore.profileChangedNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.applyHearingForAccount() }
-        }
-        AccountProfileStore.shared.showNotice = { [weak self] notice in self?.showQuietNotice(notice) }
-        AccountProfileStore.shared.start()
+        OpenClickyConfiguration.showNotice = { [weak self] notice in self?.showQuietNotice(notice) }
+        Task { await PlanAutoLink.run() }
         // Eagerly touch the Claude API so its TLS warmup handshake completes
         // well before the onboarding demo fires at ~40s into the video.
         _ = claudeAPI
@@ -902,6 +908,7 @@ final class CompanionManager: ObservableObject {
 
         // OpenClicky: the notch HUD is always available; it needs no permissions.
         notchHUDManager.show(companionManager: self)
+        applyHUDPlacement()
         startDictation()
         startPermissionPrompts()
         if OpenClickyConfiguration.connectorsEnabled {
@@ -976,15 +983,12 @@ final class CompanionManager: ObservableObject {
 
         // Track individual permission grants as they happen
         if !previouslyHadAccessibility && hasAccessibilityPermission {
-            ClickyAnalytics.trackPermissionGranted(permission: "accessibility")
             // First of the permission cards: from here the pointer can show, and help with the rest.
             showPointerDuringSetupIfWanted(flyingFromTheNotch: true)
         }
         if !previouslyHadScreenRecording && hasScreenRecordingPermission {
-            ClickyAnalytics.trackPermissionGranted(permission: "screen_recording")
         }
         if !previouslyHadMicrophone && hasMicrophonePermission {
-            ClickyAnalytics.trackPermissionGranted(permission: "microphone")
         }
         // Screen content permission is persisted — once the user has approved the
         // SCShareableContent picker, we don't need to re-check it.
@@ -993,7 +997,6 @@ final class CompanionManager: ObservableObject {
         }
 
         if !previouslyHadAll && allPermissionsGranted {
-            ClickyAnalytics.trackAllPermissionsGranted()
         }
 
         permissionPromptController.update(with: permissionStatus)
@@ -1088,7 +1091,6 @@ final class CompanionManager: ObservableObject {
                     guard didCapture else { return }
                     hasScreenContentPermission = true
                     UserDefaults.standard.set(true, forKey: "hasScreenContentPermission")
-                    ClickyAnalytics.trackPermissionGranted(permission: "screen_content")
 
                     // If onboarding was already completed, show the cursor overlay now
                     if hasCompletedOnboarding && allPermissionsGranted && !isOverlayVisible && isClickyCursorEnabled {
@@ -1477,7 +1479,6 @@ final class CompanionManager: ObservableObject {
         TeacherPlugin.clearBoard(reason: "a new question")
         lastQuestionWasTyped = true
         lastTranscript = trimmedText
-        ClickyAnalytics.trackUserMessageSent(characterCount: trimmedText.count)
         print("⌨️ Typed request: \(trimmedText)")
 
         guard usesRealtimeVoice else {
@@ -1502,7 +1503,7 @@ final class CompanionManager: ObservableObject {
     /// otherwise the standard lane listens on this Mac and asks as ⌃⌥ would.
     func toggleHandsFree() {
         guard usesRealtimeVoice || OpenClickyConfiguration.isConfigured else {
-            // Nothing could answer: no key, no plan and no account.
+            // Nothing could answer: no key and no plan.
             streamCursorCaption(ProviderRouter.needsAnthropicKeySentence, holdSeconds: 6)
             return
         }
@@ -1576,7 +1577,6 @@ final class CompanionManager: ObservableObject {
             showAskCaption("listening…", holdSeconds: 60)
     
 
-            ClickyAnalytics.trackPushToTalkStarted()
 
             pendingKeyboardShortcutStartTask?.cancel()
             pendingKeyboardShortcutStartTask = Task {
@@ -1602,7 +1602,6 @@ final class CompanionManager: ObservableObject {
                             self.showAskCaption("didn't catch that. hold ⌃⌥ and ask again.", holdSeconds: 3)
                             return
                         }
-                        ClickyAnalytics.trackUserMessageSent(characterCount: finalTranscript.count)
                         // Show what was heard and that an answer is coming, until the voice starts.
                         self.showAskCaption("“\(question)” · thinking…", holdSeconds: 30)
                         self.sendTranscriptToClaudeWithScreenshot(transcript: finalTranscript)
@@ -1614,7 +1613,6 @@ final class CompanionManager: ObservableObject {
             // before the async startPushToTalk had a chance to begin recording.
             // Without this, a quick press-and-release drops the release event and
             // leaves the waveform overlay stuck on screen indefinitely.
-            ClickyAnalytics.trackPushToTalkReleased()
             pendingKeyboardShortcutStartTask?.cancel()
             pendingKeyboardShortcutStartTask = nil
             buddyDictationManager.stopPushToTalkFromKeyboardShortcut()
@@ -1727,7 +1725,6 @@ final class CompanionManager: ObservableObject {
                 // docs/superpowers/specs/2026-10-27-on-device-ask-rung-design.md). It runs inside
                 // the pause when there is one, so a cloud question is never slower than today; a
                 // local decision does the thing, and the pause (and the screenshot) never happen.
-                var localRungOutcome: String?
                 var earlyWritingTarget: WritingTarget?
                 // Captured once: a second look costs up to 2.5 s with a Chromium app in front.
                 var writingTargetWasCaptured = false
@@ -1736,7 +1733,6 @@ final class CompanionManager: ObservableObject {
                     switch LocalAskRung.gate(transcript: transcript, replyLanguageCode: ReplyLanguage.currentCode) {
                     case .skip(let reason):
                         AppLog.append("local rung: gate skipped (\(reason))")
-                        localRungOutcome = "gate_skipped"
                     case .tryModel(let mentionsRewriting):
                         // A rewrite needs the text now; the cloud path reuses what was captured.
                         if mentionsRewriting {
@@ -1765,7 +1761,6 @@ final class CompanionManager: ObservableObject {
                             decision = await localAskRung.decide(transcript: transcript, writingTarget: earlyWritingTarget, budgetSeconds: budgetSeconds)
                         }
                         if case .cloud(let reason) = decision {
-                            localRungOutcome = "cloud_" + reason.lowercased().replacingOccurrences(of: ":", with: "").split(separator: " ").joined(separator: "_")
                         } else {
                             guard !Task.isCancelled else { return }
                             await performLocalDecision(decision, transcript: transcript, writingTarget: earlyWritingTarget)
@@ -1787,15 +1782,15 @@ final class CompanionManager: ObservableObject {
                     showAskCaption("“\(transcript)” · thinking…", holdSeconds: 30)
                 }
                 // Captured after the pause, so what is sent is what is on screen now.
-                // Capture all connected screens so the AI has full context (an account sends at most two)
+                // Capture all connected screens so the AI has full context 
                 let allScreenCaptures: [CompanionScreenCapture]
                 do {
                     allScreenCaptures = try await CompanionScreenCaptureUtility.captureAllScreensAsJPEG()
                 } catch {
-                    // Told apart from a backend failure, so the person is sent to the right place.
+                    // Told apart from a provider failure, so the person is sent to the right place.
                     throw AskScreenCaptureError(underlyingError: error)
                 }
-                let screenCaptures = Self.screensForAsk(allScreenCaptures, capabilities: AccountCapabilities.current())
+                let screenCaptures = Self.screensForAsk(allScreenCaptures)
 
                 guard !Task.isCancelled else { return }
 
@@ -1804,7 +1799,7 @@ final class CompanionManager: ObservableObject {
                 // The agent lane needs the openclicky tool (not in the downloaded app); without it the
                 // quick actions below are offered to whoever answers instead.
                 let agentLaneRuns = isAgentModeEnabled && OpenClickyConfiguration.isConfigured
-                    && AccountCapabilities.current().usesAgent && OpenClickyAgentClient.isToolInstalled
+                    && ProviderCapabilities.current().usesAgent && OpenClickyAgentClient.isToolInstalled
                 if agentLaneRuns {
                     agentActivityText = "deciding…"
                     let lane = await openClickyAgentClient.classifyLane(for: transcript)
@@ -1853,13 +1848,13 @@ final class CompanionManager: ObservableObject {
                     (userPlaceholder: entry.userTranscript, assistantResponse: entry.assistantResponse)
                 }
 
-                // Offered wherever the agent lane doesn't run (an account, or no openclicky tool on
+                // Offered wherever the agent lane doesn't run (no agent set up, or no openclicky tool on
                 // this Mac), and to a Claude Code or Codex plan through PlanToolProtocol's [ACTION: …] lines.
                 let tools = Self.offersQuickActionsToAskLane(
                     agentLaneRuns: agentLaneRuns,
                     answeringSource: ProviderRouter.route(for: .claude, credentials: ProviderRouter.currentCredentials()).answeringSource
                 ) ? MacAction.anthropicToolDefinitions() : []
-                let toolsLine = tools.isEmpty ? "" : "\n\n" + Self.accountToolsInstruction
+                let toolsLine = tools.isEmpty ? "" : "\n\n" + Self.quickActionsInstruction
                 // Offered whatever the lane setup, but only when there is text to write over;
                 // without one the model is told not to read a rewrite out.
                 var askTools = writingTarget == nil ? tools : tools + [WriteInPlace.anthropicToolDefinition()]
@@ -1931,7 +1926,7 @@ final class CompanionManager: ObservableObject {
                         if outcome.didSomething { lastSuccessfulQuickActionAt = Date() }
                         toolOutcomes.append(outcome.spokenSentence)
                     case .badArguments(let outcome): toolOutcomes.append(outcome.spokenSentence)
-                    case .notAFastAction: toolOutcomes.append(AccountLimitError.notOnPlan.message)
+                    case .notAFastAction: toolOutcomes.append(Self.agentNeedsSetupSentence)
                     }
                 }
 
@@ -1984,10 +1979,6 @@ final class CompanionManager: ObservableObject {
                 }
 
                 print("🧠 Conversation history: \(conversationHistory.count) exchanges")
-                // An answer spent some of the allowance: the profile store notices crossing 80%.
-                if AccountCapabilities.current().kind == .account { AccountProfileStore.shared.refresh() }
-
-                ClickyAnalytics.trackAIResponseReceived(characterCount: spokenText.count, localRung: localRungOutcome)
 
                 // Wait for the voice to finish. A question asked meanwhile cancels this task, and the
                 // cancellation is passed on to the playback.
@@ -2007,20 +1998,10 @@ final class CompanionManager: ObservableObject {
                     // Not an outage: nothing is set up to answer yet. Said in text beside the
                     // pointer, not in the system voice, which reads a setup note like an alarm.
                     showAskCaption(unavailable.sentence, holdSeconds: 8)
-                } else if let signInError = error as? BackendSignInError {
-                    // The backend refused the token and BackendSignIn has already renewed it once and
-                    // asked again: the sign-in is over, or could not be renewed right now.
-                    speakWithSystemVoice(OpenClickyAuthSession.spokenSentence(after: signInError))
-                } else if let refusal = Self.refusedQuestion(error), Self.isSignInRejection(refusal) {
-                    // A 401 BackendSignIn passed through (an own key's refusal relayed by the backend,
-                    // or a request sent with no token), or Anthropic refusing an own key directly.
-                    speakWithSystemVoice(await OpenClickyAuthSession.shared.sentenceAfterBackendRejection(responseBody: refusal.body))
-                } else if Self.isAccountNotice(error) {
-                    if let notice = Self.accountNoticeToSpeak(for: error, alreadySpoken: &spokenAccountNotices) {
-                        speakWithSystemVoice(notice)
-                    }
+                } else if Self.isKeyRejection(error) {
+                    // Anthropic refused the person's own key.
+                    speakWithSystemVoice(Self.ownKeyRefusedSentence)
                 } else {
-                    ClickyAnalytics.trackResponseError(error: error.localizedDescription)
                     print("⚠️ Companion response error: \(error)")
                     speakWithSystemVoice(Self.askFailureSentence(
                         for: error, screenRecordingAllowed: WindowPositionManager.hasScreenRecordingPermission()))
@@ -2053,14 +2034,8 @@ final class CompanionManager: ObservableObject {
                 answerPlayback.cancel()
             }
         } catch let failure as SpeechQueue.Failure {
-            // 402 is the account's voice allowance (tts_budget): the system voice is the plan, not a failure.
-            let nsError = failure.underlyingError as NSError
-            let voiceRefusal = failure.underlyingError as? BackendHTTPError
-            let isVoiceAllowanceSpent = voiceRefusal?.service == .voice && voiceRefusal?.status == 402
-            if !isVoiceAllowanceSpent {
-                ClickyAnalytics.trackTTSError(error: nsError.localizedDescription)
-            }
-            print("⚠️ TTS via backend failed (\(nsError.localizedDescription)); using the system voice")
+let nsError = failure.underlyingError as NSError
+            print("⚠️ TTS failed (\(nsError.localizedDescription)); using the system voice")
             AppLog.append("ask: voice failed (\(nsError.code)); using the system voice")
             if !Task.isCancelled {
                 // The success path dismisses "thinking…" when the voice starts; the system
@@ -2080,10 +2055,8 @@ final class CompanionManager: ObservableObject {
         answeringSourceName = Self.localAnswerSourceName
         showAskCaption("“\(transcript)” · on this mac", holdSeconds: 10)
         let sentence: String
-        let outcomeForAnalytics: String
         switch decision {
         case .quickAction(let toolName, let arguments):
-            outcomeForAnalytics = "local_action"
             if case .action(let action) = MacAction.parse(toolName: toolName, arguments: arguments) {
                 let outcome = await macActionRunner.perform(action)
                 if outcome.didSomething { lastSuccessfulQuickActionAt = Date() }
@@ -2094,7 +2067,6 @@ final class CompanionManager: ObservableObject {
                 sentence = Self.emptyAnswerSentence
             }
         case .rewrite(let newText):
-            outcomeForAnalytics = "local_rewrite"
             if let writingTarget {
                 let rewrite = await WriteInPlace.replace(writingTarget, with: newText)
                 if rewrite.didReplace { lastSuccessfulQuickActionAt = Date() }
@@ -2103,7 +2075,6 @@ final class CompanionManager: ObservableObject {
                 sentence = Self.emptyAnswerSentence
             }
         case .textAlreadyReadsWell:
-            outcomeForAnalytics = "local_rewrite_unchanged"
             sentence = Self.textAlreadyReadsWellSentence
         case .cloud:
             return
@@ -2125,7 +2096,6 @@ final class CompanionManager: ObservableObject {
         activeAnswerPlayback = answerPlayback
         answerSpeaker.receiveWholeReply(sentence)
         rememberExchange(userTranscript: transcript, assistantResponse: sentence)
-        ClickyAnalytics.trackAIResponseReceived(characterCount: sentence.count, localRung: outcomeForAnalytics)
         do {
             try await waitForAnswerVoice(answerPlayback: answerPlayback, answerSpeaker: answerSpeaker)
         } catch where Self.isCancellation(error) || Task.isCancelled {
@@ -2298,7 +2268,7 @@ final class CompanionManager: ObservableObject {
     }
 
     /// The screenshot for a question could not be taken (Screen Recording off, or ScreenCaptureKit
-    /// failing), as opposed to the backend failing.
+    /// failing), as opposed to the provider failing.
     struct AskScreenCaptureError: Error {
         let underlyingError: Error
     }
@@ -2331,11 +2301,10 @@ final class CompanionManager: ObservableObject {
         return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
     }
 
-    /// What the companion says when a question fails for a reason that is not the account's
-    /// (sign-in and limits have their own sentences). The token sentence is kept for the backend
-    /// refusing the token; a capture failure or a dropped connection says what actually happened.
+    /// What the companion says when a question fails: a capture failure or a dropped connection
+    /// says what actually happened.
     static func askFailureSentence(for error: Error, screenRecordingAllowed: Bool) -> String {
-        // No key for Claude and no account: say which key would do.
+        // Nothing set up to answer: say what would do.
         if let unavailable = error as? ProviderRouteUnavailable { return unavailable.sentence }
         if error is AskScreenCaptureError {
             return screenRecordingAllowed
@@ -2351,7 +2320,7 @@ final class CompanionManager: ObservableObject {
             }
         }
         if let refusal = refusedQuestion(error), refusal.status == 401 || refusal.status == 403 {
-            return "something went wrong talking to the openclicky backend. check the backend and your token in the settings file."
+            return ownKeyRefusedSentence
         }
         // Not an HTTP refusal: the stream had started when Anthropic reported the failure.
         let nsError = error as NSError
@@ -2378,7 +2347,6 @@ final class CompanionManager: ObservableObject {
             interruptCurrentAnswer(includingAgentWork: true)
             clearDetectedElementLocation()
             TeacherPlugin.clearBoard(reason: "a new question")
-            ClickyAnalytics.trackPushToTalkStarted()
             voiceState = .listening
             Task { [weak self] in
                 guard let self else { return }
@@ -2392,13 +2360,12 @@ final class CompanionManager: ObservableObject {
                     self.voiceState = .idle
                     self.lastQuestionFailed = true
                     self.speakWithSystemVoice("Realtime voice is unavailable right now.")
-                    // Why, on screen: "check the backend" sent people looking at the network
+                    // Why, on screen: a vague failure sent people looking at the network
                     // when the answer was a rejected key.
                     self.streamCursorCaption(error.localizedDescription, holdSeconds: 12)
                 }
             }
         case .released:
-            ClickyAnalytics.trackPushToTalkReleased()
             guard voiceState == .listening else { return }
             voiceState = .processing
             realtimeVoiceClient.endPushToTalk()
@@ -2421,12 +2388,11 @@ final class CompanionManager: ObservableObject {
     /// The speaker for one spoken reply: its pieces are fetched and played by the answer voice
     /// player, the next one fetched while the current one plays.
     private func makeAnswerSpeaker(onVoiceStarts: @escaping () -> Void, onPointTag: @escaping (String) -> Void) -> StreamingAnswerSpeaker {
-        // One session per answer, so a late or failed free voice hands the rest of this answer to
-        // the local voice and the next answer tries again (AccountVoiceGuard.swift).
-        let answerVoiceSession = answerVoicePlayer.makeAnswerSession()
+        // One fetcher per answer, so an answer stays in one voice.
+        let fetchAnswerAudio = answerVoicePlayer.makeAnswerFetcher()
         return StreamingAnswerSpeaker(
             speechQueue: SpeechQueue(
-                fetchAudio: { pieceText in try await answerVoiceSession.audio(for: pieceText) },
+                fetchAudio: { pieceText in try await fetchAnswerAudio(pieceText) },
                 playAudio: { [answerVoicePlayer] audioData in try await answerVoicePlayer.playToCompletion(audioData) }
             ),
             onVoiceStarts: onVoiceStarts,
@@ -2562,8 +2528,8 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    /// OpenClicky: speak with the built-in macOS voice when the backend has no text-to-speech
-    /// route (for example an OpenRouter-only backend). Keeps the conversation audible.
+    /// OpenClicky: speak with the built-in macOS voice when no voice can speak.
+    /// Keeps the conversation audible.
     private let systemSpeechSynthesizer = AVSpeechSynthesizer()
     /// Tells when a system-voice utterance has ended, finished or stopped.
     private let systemSpeechFinishObserver = SystemSpeechFinishObserver()
@@ -2634,7 +2600,7 @@ final class CompanionManager: ObservableObject {
     }
 
     /// The ask lane offers the quick actions where nothing else does them: whenever the agent lane
-    /// doesn't run (a free account, or no openclicky tool on this Mac), and to a plan, which the
+    /// doesn't run (no agent set up, or no openclicky tool on this Mac), and to a plan, which the
     /// agent lane's gate never sees as the one answering.
     static func offersQuickActionsToAskLane(agentLaneRuns: Bool, answeringSource: AnswerSource?) -> Bool {
         if !agentLaneRuns { return true }
@@ -2645,7 +2611,7 @@ final class CompanionManager: ObservableObject {
     /// question is taught, and nothing is ever sent.
     static let commandOrQuestionInstruction = "When the user tells you to do something you have a tool for (\"open…\", \"play…\", \"minimize…\", \"search for…\", \"scroll down\", \"click…\", \"look for…\", \"check my email\", \"draft an email\"), do it with the tool and confirm in a few words. Do not explain how they could do it themselves and do not point. When they ask how to do something (\"how do I…\", \"where is…\", \"show me how\"), teach: explain and point, and do not do it for them. If you are not sure which they meant, ask in one short question. You never send email: a draft is left open for the user to read and send."
 
-    static let accountToolsInstruction = "When the user asks you to open an app or a website, search the web, make or show a folder, change the volume, control playback or play a song, minimize everything, check your email or draft an email, call the matching tool instead of describing the steps. For anything else you can only explain and point. " + commandOrQuestionInstruction
+    static let quickActionsInstruction = "When the user asks you to open an app or a website, search the web, make or show a folder, change the volume, control playback or play a song, minimize everything, check your email or draft an email, call the matching tool instead of describing the steps. For anything else you can only explain and point. " + commandOrQuestionInstruction
 
     /// What the companion says: the answer, then what each quick action did.
     static func spokenReply(text: String, toolOutcomes: [String]) -> String {
@@ -2653,58 +2619,25 @@ final class CompanionManager: ObservableObject {
         return ([answer] + toolOutcomes).filter { !$0.isEmpty }.joined(separator: " ")
     }
 
-    /// The refusal of a question (ClaudeAPI's /chat, or Anthropic on an own key), as it came; nil
-    /// for anything else, including the voice's own refusals.
-    static func refusedQuestion(_ error: Error) -> BackendHTTPError? {
-        guard let refusal = error as? BackendHTTPError, refusal.service == .answers else { return nil }
-        return refusal
+    /// The refusal of a question by Anthropic on an own key, as it came; nil for anything else.
+    static func refusedQuestion(_ error: Error) -> AnswerHTTPError? {
+        error as? AnswerHTTPError
     }
 
-    /// The plain sentence for an account limit, when the ask lane's Claude call answered 402.
-    static func limitSentence(for error: Error) -> String? {
-        guard let refusal = refusedQuestion(error), refusal.status == 402 else { return nil }
-        let message = AccountLimitError.from(status: 402, body: refusal.body)?.message ?? ""
-        return message.isEmpty ? AccountLimitError.personalLimit.message : message
-    }
-
-    /// The question was refused with a 401: the account's token (expired, or issued before a move),
-    /// or the person's own key, refused by Anthropic or relayed by the backend.
-    static func isSignInRejection(_ error: Error) -> Bool {
+    /// The question was refused with a 401: the person's own key.
+    static func isKeyRejection(_ error: Error) -> Bool {
         refusedQuestion(error)?.status == 401
     }
 
-    /// The account's answer to a failed ask: a 402 limit, or the free service's 503 trouble.
-    static func isAccountNotice(_ error: Error) -> Bool {
-        guard let refusal = refusedQuestion(error) else { return false }
-        return refusal.status == 402 || isServiceTrouble(refusal)
+    static let ownKeyRefusedSentence = "your own api key was refused. check it in settings, keys & plans."
+    static let agentNeedsSetupSentence = "that needs an agent. switch on codex in settings, keys & plans, or add your own openai key."
+
+    /// The screens a question carries: the cursor's screen first.
+    static func screensForAsk(_ captures: [CompanionScreenCapture]) -> [CompanionScreenCapture] {
+        captures.filter(\.isCursorScreen) + captures.filter { !$0.isCursorScreen }
     }
 
-    /// The sentence for an account notice the first time this session; nil afterwards (and for any
-    /// other error), so a lane that keeps hitting the same limit falls back silently.
-    static func accountNoticeToSpeak(for error: Error, alreadySpoken: inout Set<String>) -> String? {
-        let sentence: String?
-        if let refusal = refusedQuestion(error), isServiceTrouble(refusal) {
-            sentence = AccountLimitError.serviceTroubleMessage
-        } else {
-            sentence = limitSentence(for: error)
-        }
-        guard let sentence, alreadySpoken.insert(sentence).inserted else { return nil }
-        return sentence
-    }
-
-    private static func isServiceTrouble(_ refusal: BackendHTTPError) -> Bool {
-        refusal.status == 503 && AccountLimitError.isServiceTrouble(status: refusal.status, body: refusal.body)
-    }
-
-    /// The screens a question carries: the cursor's screen first, and for an account at most one
-    /// other (the grant takes two images).
-    static func screensForAsk(_ captures: [CompanionScreenCapture], capabilities: AccountCapabilities) -> [CompanionScreenCapture] {
-        let cursorFirst = captures.filter(\.isCursorScreen) + captures.filter { !$0.isCursorScreen }
-        guard let limit = capabilities.maxAskScreens else { return cursorFirst }
-        return Array(cursorFirst.prefix(limit))
-    }
-
-    /// One quiet caption (the running-low notice), typed out the way the Home tab's (i) is.
+    /// One quiet caption, typed out the way the Home tab's (i) is.
     func showQuietNotice(_ message: String) {
         showCaptionBesideMouse(message, holdSeconds: 8)
         scheduleTransientHideIfNeeded()
@@ -2713,8 +2646,12 @@ final class CompanionManager: ObservableObject {
     /// Speaks a hardcoded error message with the system voice when the agent lane fails. It uses
     /// the synthesizer every new question stops: a separate NSSpeechSynthesizer used to keep
     /// talking over the next question.
-    private func speakCreditsErrorFallback() {
-        speakWithSystemVoice("something went wrong talking to the openclicky backend. check the backend and your token in the settings file.")
+    private func speakAgentErrorFallback() {
+        if let paused = ProviderCapabilities.current().agentPausedSentence {
+            speakWithSystemVoice(paused)
+            return
+        }
+        speakWithSystemVoice("something went wrong running that task. check that codex is signed in, then try again.")
     }
 
     // MARK: - Point Tag Parsing
@@ -2808,7 +2745,6 @@ final class CompanionManager: ObservableObject {
     /// pointing demo once, then stream in the "press control + option" prompt. Kept the name so
     /// the overlay's call site is unchanged.
     func setupOnboardingVideo() {
-        ClickyAnalytics.trackOnboardingDemoTriggered()
         performOnboardingDemoInteraction()
         DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { [weak self] in
             guard let self, !self.isCursorCaptionVisible else { return }
@@ -3182,7 +3118,6 @@ extension CompanionManager {
                 self.lastQuestionWasTyped = false
                 self.lastTranscript = heard
                 self.askOutcome = .resolved
-                ClickyAnalytics.trackUserMessageSent(characterCount: heard.count)
                 self.showAskCaption("“\(heard)” · thinking…", holdSeconds: 30)
                 self.sendTranscriptToClaudeWithScreenshot(transcript: heard)
             }

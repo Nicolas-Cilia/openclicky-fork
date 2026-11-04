@@ -26,10 +26,10 @@ public sealed partial class CompanionManager
     {
         var trimmedText = text.Trim();
         if (trimmedText.Length == 0 || !OpenClickyConfiguration.IsConfigured) return;
-        // An account has no agent: the backend would refuse it with not_on_plan, so say that plainly.
-        if (!AccountCapabilities.Current().UsesAgent)
+        // Nothing can run the agent: say what would, rather than failing later.
+        if (!ProviderCapabilities.Current().UsesAgent)
         {
-            SpeakWithSystemVoice(AccountLimitError.NotOnPlan.Message());
+            SpeakWithSystemVoice(ProviderCapabilities.Current().AgentPausedSentence ?? AgentNeedsSetupSentence);
             return;
         }
         InterruptCurrentAnswer(includingAgentWork: true);
@@ -57,7 +57,7 @@ public sealed partial class CompanionManager
         {
             AppLog.Write($"agent: follow-up failed ({error.GetType().Name})");
             AgentActivityText = null;
-            SpeakCreditsErrorFallback();
+            SpeakAgentErrorFallback();
         }
         await WaitForSystemVoiceNoticeToEndAsync();
         if (!cancellationToken.IsCancellationRequested)

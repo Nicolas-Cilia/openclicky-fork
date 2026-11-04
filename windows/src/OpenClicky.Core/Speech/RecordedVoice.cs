@@ -29,7 +29,6 @@ public sealed class RecordedVoice
         [RawValue("tour-talk-done")] TourTalkDone,
         [RawValue("tour-act")] TourAct,
         [RawValue("tour-act-done")] TourActDone,
-        [RawValue("tour-account")] TourAccount,
         [RawValue("tour-done")] TourDone,
         [RawValue("notice-empty-answer")] NoticeEmptyAnswer,
         [RawValue("notice-no-screen")] NoticeNoScreen,

@@ -90,7 +90,7 @@ public sealed partial class CompanionManager : ObservableObject, ICompanionSetti
     public event Action<CompanionVoiceState>? VoiceStateChanged;
 
     [ObservableProperty] private string? lastTranscript;
-    /// <summary>Who is answering the question being spoken ("Claude Code", "free credits"), for the island.</summary>
+    /// <summary>Who is answering the question being spoken ("Claude Code", "Codex"), for the island.</summary>
     [ObservableProperty] private string? answeringSourceName;
     [ObservableProperty] private double currentAudioPowerLevel;
     [ObservableProperty] private bool hasMicrophonePermission;
@@ -173,10 +173,8 @@ public sealed partial class CompanionManager : ObservableObject, ICompanionSetti
 
         openClickyAgentClient = new OpenClickyAgentClient(services.Processes);
         desktopActionRunner = DesktopActionRunner.Live(services.DesktopActions);
-        // Both read the backend URL per request: built once from it, they kept asking the old
-        // backend after shell.json changed while everything else followed the new one.
-        claudeAPI = new ClaudeAPI(() => $"{OpenClickyConfiguration.BackendBaseUrl}/chat", selectedModel);
-        answerVoicePlayer = new AnswerVoicePlayer(services.CreateAudioPlayer(), () => $"{OpenClickyConfiguration.BackendBaseUrl}/tts");
+        claudeAPI = new ClaudeAPI(selectedModel);
+        answerVoicePlayer = new AnswerVoicePlayer(services.CreateAudioPlayer());
         noticePlayer = services.CreateAudioPlayer();
         systemVoice = new SystemVoice(services.SystemVoice);
         // The lines whose Mac recording names Mac keys are said the Windows way by this PC's voice.
@@ -241,8 +239,7 @@ public sealed partial class CompanionManager : ObservableObject, ICompanionSetti
         Island.SettingsRequested += destination => ShowSettings(destination switch
         {
             IslandSettingsDestination.Dictation => DictationSettingsPage.Dictation,
-            IslandSettingsDestination.Keys => DictationSettingsPage.Account,
-            IslandSettingsDestination.Account => DictationSettingsPage.Account,
+            IslandSettingsDestination.Keys => DictationSettingsPage.Keys,
             _ => DictationSettingsPage.General,
         });
         Island.QuitRequested += QuitWithFarewell;
@@ -257,15 +254,6 @@ public sealed partial class CompanionManager : ObservableObject, ICompanionSetti
         Island.TourPrimaryRequested += FirstRunTour.PrimaryAction;
         Island.TourSecondaryRequested += FirstRunTour.SecondaryAction;
         Island.TourChangeMicrophoneRequested += FirstRunTour.ChangeMicrophone;
-        Island.TourFieldSubmitted += text =>
-        {
-            FirstRunTour.FieldText = text;
-            FirstRunTour.SubmitField();
-        };
-        Island.PropertyChanged += (_, eventArgs) =>
-        {
-            if (eventArgs.PropertyName == nameof(IslandCompanionModel.TourFieldText)) FirstRunTour.FieldText = Island.TourFieldText;
-        };
         PermissionPromptController.PropertyChanged += (_, eventArgs) =>
         {
             if (eventArgs.PropertyName == nameof(PermissionPromptController.CurrentPrompt)) Island.PermissionPrompt = PermissionPromptController.CurrentPrompt;
@@ -460,11 +448,11 @@ public sealed partial class CompanionManager : ObservableObject, ICompanionSetti
 
     // MARK: - Start / stop
 
-    /// <summary>An account hears with the offline engine; own keys keep the configured provider.</summary>
-    private void ApplyHearingForAccount()
+    /// <summary>Without an own OpenAI key speech is heard on this PC; with one, the configured provider.</summary>
+    private void ApplyHearing()
     {
         BuddyDictationManager.ReplaceTranscriptionProvider(
-            AccountCapabilities.Current().HearsOnDevice
+            ProviderCapabilities.Current().HearsOnDevice
                 ? new OnDeviceHearingProvider(services.OfflineSpeech)
                 : BuddyTranscriptionProviderFactory.MakeDefaultProvider(services.OfflineSpeech));
     }
@@ -485,12 +473,12 @@ public sealed partial class CompanionManager : ObservableObject, ICompanionSetti
         // The keyboard hook needs no permission on Windows (the Mac waited for Accessibility).
         try { services.Shortcuts.Start(); }
         catch (Exception error) { AppLog.Write($"shortcuts: couldn't start the keyboard hook: {error.Message}"); }
-        ApplyHearingForAccount();
+        ApplyHearing();
         // A key or token changed in shell.json: the open Realtime session was minted with the old one.
         OpenClickyConfiguration.CredentialsChanged += OnCredentialsChanged;
-        AccountProfileStore.ProfileChanged += OnAccountProfileChanged;
-        AccountProfileStore.Shared.ShowNotice = notice => services.MainThread.Post(() => ShowQuietNotice(notice));
-        AccountProfileStore.Shared.Start();
+        OpenClickyConfiguration.ShowNotice = notice => services.MainThread.Post(() => ShowQuietNotice(notice));
+        OpenClickyConfiguration.SettingsFileUnreadable += OnSettingsFileUnreadable;
+        if (OpenClickyConfiguration.IsRealSettingsFileInUse) _ = LinkSignedInPlansAsync();
 
         // Docking the pointer is gone: someone who had it docked gets it back under "the pointer shows".
         if (preferences.Contains(OverlayModel.RetiredDockedPreferenceKey))
@@ -511,13 +499,20 @@ public sealed partial class CompanionManager : ObservableObject, ICompanionSetti
     private void OnCredentialsChanged() => services.MainThread.Post(() =>
     {
         AppLog.Write("shell.json credentials changed; reconnecting realtime");
-        ApplyHearingForAccount();
+        ApplyHearing();
         if (UsesRealtimeVoice) WarmUpRealtimeVoice();
         // A key added or removed can move hands-free between fast voice and the standard lane.
         ApplyHandsFreeLane();
     });
 
-    private void OnAccountProfileChanged() => services.MainThread.Post(ApplyHearingForAccount);
+    private void OnSettingsFileUnreadable(string sentence) => services.MainThread.Post(() => ShowQuietNotice(sentence));
+
+    /// <summary>A plan already signed in on this PC starts linked; a failure only means it stays off.</summary>
+    private static async Task LinkSignedInPlansAsync()
+    {
+        try { await PlanAutoLink.RunAsync().ConfigureAwait(false); }
+        catch (Exception error) when (error is not OutOfMemoryException) { AppLog.Write($"plans: auto-link failed ({error.GetType().Name})"); }
+    }
 
     public void Stop()
     {
@@ -541,7 +536,8 @@ public sealed partial class CompanionManager : ObservableObject, ICompanionSetti
         pointerPresenceTimer?.Dispose();
         pointerPresenceTimer = null;
         OpenClickyConfiguration.CredentialsChanged -= OnCredentialsChanged;
-        AccountProfileStore.ProfileChanged -= OnAccountProfileChanged;
+        OpenClickyConfiguration.SettingsFileUnreadable -= OnSettingsFileUnreadable;
+        OpenClickyConfiguration.ShowNotice = null;
     }
 
     /// <summary>Windows says memory is low: give the local models' memory back (the Mac's memory-pressure source).</summary>

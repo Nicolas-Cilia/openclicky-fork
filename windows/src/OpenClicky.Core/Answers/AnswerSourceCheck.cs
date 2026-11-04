@@ -1,7 +1,7 @@
 // Port of macos/OpenClicky/OpenClicky/AnswerSourceCheck.swift
 //
 // "Does this really answer?": one tiny question (what colour is this red square) asked of a
-// single source, for the Test buttons in Settings → Account and the debug answer smoke.
+// single source, for the Test buttons in Settings → Keys & Plans and the debug answer smoke.
 // The red square is a PNG built here byte by byte (Core has no imaging library).
 
 using System.Buffers.Binary;
@@ -35,7 +35,7 @@ public static class AnswerSourceCheck
 
     /// <summary>
     /// Asks `source` alone, whatever the router would pick. Anthropic is checked by listing its
-    /// models (ClaudeAPI answers it, not an IAnswerProvider); the free credits aren't checked here.
+    /// models (ClaudeAPI answers it, not an IAnswerProvider).
     /// </summary>
     /// <param name="makeProvider">Builds the provider (AnswerProviderFactory.MakeAsync by default).</param>
     public static async Task<Outcome> RunAsync(AnswerSource source, ProviderCredentials credentials,
@@ -62,8 +62,6 @@ public static class AnswerSourceCheck
                         ? new Outcome.Works(stopwatch.Elapsed.TotalSeconds)
                         : new Outcome.Failed(status == 401 ? "Anthropic didn’t accept this key." : $"Anthropic answered {status}.");
                 }
-                case AnswerSource.OpenClickyAccount:
-                    return new Outcome.Failed("The free credits are checked by asking Clicky.");
                 default:
                 {
                     var provider = makeProvider is not null

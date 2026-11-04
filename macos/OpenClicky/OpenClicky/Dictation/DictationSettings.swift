@@ -20,10 +20,8 @@ enum DictationEngineChoice: String, CaseIterable, Identifiable {
     case parakeet
     /// Sarvam's Saaras, with the user's own key (`sarvamKey` in shell.json).
     case sarvam
-    /// The OpenClicky backend (an account or the user's own OpenAI key).
-    case openclicky
-    /// AssemblyAI streaming through a backend-minted token.
-    case assemblyai
+    /// OpenAI, on the user's own OpenAI key. Stored under its old name, so a saved choice survives.
+    case openAI = "openclicky"
 
     var id: String { rawValue }
 
@@ -32,8 +30,7 @@ enum DictationEngineChoice: String, CaseIterable, Identifiable {
         case .offline: return "on this Mac"
         case .parakeet: return "Parakeet"
         case .sarvam: return "Sarvam"
-        case .openclicky: return "OpenClicky"
-        case .assemblyai: return "AssemblyAI"
+        case .openAI: return "OpenAI"
         }
     }
 
@@ -44,7 +41,7 @@ enum DictationEngineChoice: String, CaseIterable, Identifiable {
     var isOnDevice: Bool {
         switch self {
         case .offline, .parakeet: return true
-        case .sarvam, .openclicky, .assemblyai: return false
+        case .sarvam, .openAI: return false
         }
     }
 }
@@ -59,8 +56,7 @@ extension DictationEngineChoice {
         switch self {
         case .offline, .parakeet: return "this mac"
         case .sarvam: return "sarvam"
-        case .openclicky: return "openai"
-        case .assemblyai: return "assemblyai"
+        case .openAI: return "openai"
         }
     }
 
@@ -70,8 +66,7 @@ extension DictationEngineChoice {
         case .offline: return "This Mac"
         case .parakeet: return "Parakeet, on this Mac"
         case .sarvam: return "Sarvam"
-        case .openclicky: return "OpenAI, via OpenClicky"
-        case .assemblyai: return "AssemblyAI, via OpenClicky"
+        case .openAI: return "OpenAI"
         }
     }
 
@@ -80,7 +75,7 @@ extension DictationEngineChoice {
         switch self {
         case .offline: return "On this Mac"
         case .sarvam: return "Sarvam hears you"
-        case .parakeet, .openclicky, .assemblyai: return settingsTitle
+        case .parakeet, .openAI: return settingsTitle
         }
     }
 
@@ -89,8 +84,7 @@ extension DictationEngineChoice {
         switch self {
         case .offline, .parakeet: return "Private · offline"
         case .sarvam: return "Audio goes to Sarvam"
-        case .openclicky: return "Audio goes to OpenAI"
-        case .assemblyai: return "Audio goes to AssemblyAI"
+        case .openAI: return "Audio goes to OpenAI"
         }
     }
 
@@ -99,21 +93,19 @@ extension DictationEngineChoice {
         switch self {
         case .offline, .parakeet: return "Your voice stays on this Mac."
         case .sarvam: return "Audio goes to Sarvam with your key."
-        case .openclicky: return "Audio goes to OpenAI through the OpenClicky backend."
-        case .assemblyai: return "Audio goes to AssemblyAI through the OpenClicky backend."
+        case .openAI: return "Audio goes to OpenAI with your key."
         }
     }
 
     /// What the engine does and what it needs, under its name in Settings.
     var settingsDetail: String {
         switch self {
-        case .offline: return "Apple’s on-device recogniser. Nothing leaves this Mac. No key, no account."
+        case .offline: return "Apple’s on-device recogniser. Nothing leaves this Mac. No key needed."
         case .parakeet: return ParakeetDictation.isRecommendedForThisMac
             ? "Far more accurate than Apple’s recogniser on this Mac, and offline too. English and 24 European languages. A \(ParakeetDictation.downloadSizeText) download."
             : "NVIDIA’s open model, offline. English and 24 European languages. A \(ParakeetDictation.downloadSizeText) download."
         case .sarvam: return "Saaras hears eleven Indian languages. Billed by Sarvam to your key."
-        case .openclicky: return "Needs an OpenClicky account or your own OpenAI key."
-        case .assemblyai: return "Words appear as you speak. Needs the OpenClicky backend."
+        case .openAI: return "Billed by OpenAI to your own key."
         }
     }
 
@@ -123,8 +115,7 @@ extension DictationEngineChoice {
         case .offline: return ""
         case .parakeet: return "Not downloaded"
         case .sarvam: return "Needs a key"
-        case .openclicky: return "Needs account"
-        case .assemblyai: return "Needs backend"
+        case .openAI: return "Needs a key"
         }
     }
 
@@ -136,8 +127,7 @@ extension DictationEngineChoice {
         case .offline: return common + onDeviceKeywords + ["apple"]
         case .parakeet: return common + onDeviceKeywords + ["parakeet", "nvidia", "download", "model"]
         case .sarvam: return common + ["sarvam", "saaras", "key", "api key", "indian", "hindi"]
-        case .openclicky: return common + onDeviceKeywords + ["openai", "openclicky", "account", "backend"]
-        case .assemblyai: return common + onDeviceKeywords + ["assemblyai", "streaming", "backend"]
+        case .openAI: return common + onDeviceKeywords + ["openai", "key", "api key"]
         }
     }
 }
@@ -222,11 +212,7 @@ struct DictationLanguage: Identifiable, Equatable {
 
 @MainActor
 final class DictationSettings: ObservableObject {
-    static let shared: DictationSettings = {
-        let settings = DictationSettings()
-        settings.followAccountProfile()
-        return settings
-    }()
+    static let shared = DictationSettings()
 
     private let defaults: UserDefaults
 
@@ -240,10 +226,6 @@ final class DictationSettings: ObservableObject {
         // Live typing, which only runs when no model will polish, starts once it is switched off.
         polishWithModel = defaults.object(forKey: Keys.polishWithModel) == nil ? true : defaults.bool(forKey: Keys.polishWithModel)
         polishOfflineTakes = defaults.bool(forKey: Keys.polishOfflineTakes)
-        // Before the explicit flag existed, a stored value could only have come from the toggle.
-        if defaults.object(forKey: Keys.polishOfflineTakes) != nil, defaults.object(forKey: Keys.polishOfflineTakesChosen) == nil {
-            defaults.set(true, forKey: Keys.polishOfflineTakesChosen)
-        }
         dictationKey = DictationHotkey(rawValue: defaults.string(forKey: Keys.dictationKey) ?? "") ?? .fn
         orbVisible = defaults.object(forKey: Keys.orbVisible) == nil ? true : defaults.bool(forKey: Keys.orbVisible)
         orbLook = OrbLook(rawValue: defaults.string(forKey: Keys.orbLook) ?? "") ?? .pill
@@ -286,7 +268,6 @@ final class DictationSettings: ObservableObject {
         static let polishWithModel = "dictation.polishWithModel"
         static let polishOfflineTakes = "dictation.polishOfflineTakes"
         /// Set once the person flips "also polish takes heard on this mac" themselves.
-        static let polishOfflineTakesChosen = "dictation.polishOfflineTakesChosen"
         static let dictationKey = "dictation.key"
         static let orbVisible = "dictation.orb.visible"
         static let orbLook = "dictation.orb.look"
@@ -327,37 +308,12 @@ final class DictationSettings: ObservableObject {
     /// The offline engine's promise is that nothing leaves the Mac; sending its words to a model
     /// for polish is off until asked for by name.
     @Published var polishOfflineTakes: Bool {
-        didSet { if !isApplyingAccountDefault { defaults.set(polishOfflineTakes, forKey: Keys.polishOfflineTakes) } }
+        didSet { defaults.set(polishOfflineTakes, forKey: Keys.polishOfflineTakes) }
     }
-    private var isApplyingAccountDefault = false
-    private var accountObservers: [NSObjectProtocol] = []
 
-    /// The settings toggle: the person's own choice, which the account default never overrides.
+    /// The settings toggle.
     func choosePolishOfflineTakes(_ isOn: Bool) {
-        defaults.set(true, forKey: Keys.polishOfflineTakesChosen)
         polishOfflineTakes = isOn
-    }
-
-    /// A free account's takes go to its model anyway, so until the person chooses, polish of takes
-    /// heard on this Mac is on for accounts and off otherwise. The default is not stored, so it
-    /// follows the account as it changes.
-    func applyAccountPolishDefault(kind: AccountKind) {
-        guard !defaults.bool(forKey: Keys.polishOfflineTakesChosen) else { return }
-        let wanted = kind == .account
-        guard polishOfflineTakes != wanted else { return }
-        isApplyingAccountDefault = true
-        polishOfflineTakes = wanted
-        isApplyingAccountDefault = false
-    }
-
-    /// Re-applies the default whenever credentials change or the backend's answer changes the account.
-    private func followAccountProfile() {
-        applyAccountPolishDefault(kind: AccountCapabilities.current().kind)
-        for name in [OpenClickyConfiguration.credentialsChangedNotification, AccountProfileStore.profileChangedNotification] {
-            accountObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
-                Task { @MainActor in DictationSettings.shared.applyAccountPolishDefault(kind: AccountCapabilities.current().kind) }
-            })
-        }
     }
 
     var language: DictationLanguage { DictationLanguage.named(languageCode) }

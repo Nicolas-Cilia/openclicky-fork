@@ -20,7 +20,6 @@ export default tseslint.config(
       "**/node_modules/**",
       "macos/**",
       "reference/**",
-      "backend/src/skills-manifest.ts",
     ],
   },
 
@@ -33,7 +32,7 @@ export default tseslint.config(
         // The `typecheck` tsconfigs, not the build ones: the build configs include only `src`, so
         // every test file would come back "not found by the project service" — the same gap that
         // let an unchecked test import a type `jose` no longer exports.
-        project: ["./backend/tsconfig.typecheck.json", "./agent/tsconfig.typecheck.json"],
+        project: ["./agent/tsconfig.typecheck.json"],
         tsconfigRootDir: import.meta.dirname,
       },
       globals: { ...globals.node },

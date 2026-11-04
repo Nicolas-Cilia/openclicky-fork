@@ -47,7 +47,7 @@ describe("Windows spawning", () => {
   });
 
   it("keeps the Windows system variables in Codex's environment", () => {
-    const cfg = resolveConfig({ token: "t" }, { HOME: "/h" });
+    const cfg = resolveConfig({}, { HOME: "/h" });
     const source = { PATH: "C:\\Windows", SystemRoot: "C:\\Windows", USERPROFILE: "C:\\Users\\t", APPDATA: "C:\\Users\\t\\AppData\\Roaming", AWS_SECRET_ACCESS_KEY: "secret" };
     const windows = buildChildEnv(cfg, source, "win32");
     expect(windows.SystemRoot).toBe("C:\\Windows");

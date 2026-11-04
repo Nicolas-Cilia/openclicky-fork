@@ -9,7 +9,7 @@ import { transcribe } from "../src/audio.js";
 import { RealtimeSession } from "../src/realtime.js";
 import { openaiRoute, anthropicRoute } from "../src/providerRoute.js";
 
-// Own keys are the primary route: straight to the vendor. The backend only for a capability with no own key.
+// Own keys go straight to the vendor; with no key a capability has no route.
 
 type Seen = { url: string; headers: Record<string, string>; body: unknown };
 function recorder(reply: () => Response) {
@@ -21,21 +21,15 @@ function recorder(reply: () => Response) {
   }) as unknown as typeof fetch;
   return { seen, fetchImpl };
 }
-const cfgWith = (env: Record<string, string>, token?: string) => resolveConfig({ backendUrl: "http://backend.test", token }, { HOME: "/tmp", ...env });
+const cfgWith = (env: Record<string, string>) => resolveConfig({}, { HOME: "/tmp", ...env });
 
 describe("provider routes", () => {
-  it("own key → vendor; token only → backend without own keys; neither → none", () => {
-    const own = cfgWith({ OPENCLICKY_OPENAI_KEY: "sk-user", OPENCLICKY_ANTHROPIC_KEY: "ak-user" }, "tok");
-    expect(openaiRoute(own, "/v1/chat/completions", "/chat/completions")).toEqual({ url: "https://api.openai.com/v1/chat/completions", headers: { authorization: "Bearer sk-user" }, direct: true });
-    expect(anthropicRoute(own, "/v1/messages")).toMatchObject({ url: "https://api.anthropic.com/v1/messages", headers: { "x-api-key": "ak-user", "anthropic-version": "2023-06-01" }, direct: true });
-
-    const openaiOnly = cfgWith({ OPENCLICKY_OPENAI_KEY: "sk-user" }, "tok");
-    const claudeViaAccount = anthropicRoute(openaiOnly, "/v1/messages")!;
-    expect(claudeViaAccount).toEqual({ url: "http://backend.test/v1/messages", headers: { authorization: "Bearer tok" }, direct: false });
-    expect(JSON.stringify(claudeViaAccount)).not.toContain("sk-user");
-
-    expect(anthropicRoute(cfgWith({ OPENCLICKY_OPENAI_KEY: "sk-user" }), "/v1/messages")).toBeNull();
-    expect(openaiRoute(cfgWith({}), "/agent/transcribe", "/audio/transcriptions")).toBeNull();
+  it("own key → vendor; no key → no route", () => {
+    const own = cfgWith({ OPENCLICKY_OPENAI_KEY: "sk-user", OPENCLICKY_ANTHROPIC_KEY: "ak-user" });
+    expect(openaiRoute(own, "/chat/completions")).toEqual({ url: "https://api.openai.com/v1/chat/completions", headers: { authorization: "Bearer sk-user" } });
+    expect(anthropicRoute(own)).toMatchObject({ url: "https://api.anthropic.com/v1/messages", headers: { "x-api-key": "ak-user", "anthropic-version": "2023-06-01" } });
+    expect(anthropicRoute(cfgWith({ OPENCLICKY_OPENAI_KEY: "sk-user" }))).toBeNull();
+    expect(openaiRoute(cfgWith({}), "/audio/transcriptions")).toBeNull();
   });
 
   it("ask goes to OpenAI with the own key and a concrete model", async () => {
@@ -46,7 +40,7 @@ describe("provider routes", () => {
     expect((seen[0].body as { model: string }).model).toBe("gpt-5.5");
   });
 
-  it("ask with neither a key nor a token says what is needed", async () => {
+  it("ask with no key says what is needed", async () => {
     await expect(ask(cfgWith({}), "q")).rejects.toThrow(/own OpenAI key/);
   });
 

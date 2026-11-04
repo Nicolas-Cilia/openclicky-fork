@@ -1,6 +1,6 @@
 // Ports the model half of Dictation/UI/DictationWindow.swift and the page enum of
 // Dictation/UI/SettingsPages.swift: OpenClicky's one window lists six pages in its sidebar
-// (Dictation, Clicky, Island, Keys & Account, Privacy, General). Rows on a page open the pages under
+// (Dictation, Clicky, Island, Keys & Plans, Privacy, General). Rows on a page open the pages under
 // it (Your words, How it writes and The orb under Dictation; Calendars under Island), which keep
 // their parent selected in the sidebar, and the back button returns. Every way into the window
 // (Ctrl+, the tray, the island, the orb's menu) goes through DictationWindowModel.Open, which lands on
@@ -49,8 +49,8 @@ public enum DictationSettingsPage
     Clicky,
     /// <summary>The island: where it lives, its tiles and tools, its look.</summary>
     Island,
-    /// <summary>"Keys & Account".</summary>
-    Account,
+    /// <summary>"Keys & Plans".</summary>
+    Keys,
     Privacy,
     General,
     /// <summary>Opened from Dictation.</summary>
@@ -67,7 +67,7 @@ public static class DictationSettingsPages
     public static IReadOnlyList<DictationSettingsPage> SidebarPages { get; } =
     [
         DictationSettingsPage.Dictation, DictationSettingsPage.Clicky, DictationSettingsPage.Island,
-        DictationSettingsPage.Account, DictationSettingsPage.Privacy, DictationSettingsPage.General,
+        DictationSettingsPage.Keys, DictationSettingsPage.Privacy, DictationSettingsPage.General,
     ];
 
     /// <summary>The Swift raw value ("dictation" … "calendars"), used in the tour's target ids.</summary>
@@ -76,7 +76,7 @@ public static class DictationSettingsPages
         DictationSettingsPage.Dictation => "dictation",
         DictationSettingsPage.Clicky => "clicky",
         DictationSettingsPage.Island => "island",
-        DictationSettingsPage.Account => "account",
+        DictationSettingsPage.Keys => "account",
         DictationSettingsPage.Privacy => "privacy",
         DictationSettingsPage.General => "general",
         DictationSettingsPage.Orb => "orb",
@@ -96,7 +96,7 @@ public static class DictationSettingsPages
         DictationSettingsPage.Dictation => "Dictation",
         DictationSettingsPage.Clicky => "Clicky",
         DictationSettingsPage.Island => "Island",
-        DictationSettingsPage.Account => "Keys & Account",
+        DictationSettingsPage.Keys => "Keys & Plans",
         DictationSettingsPage.Privacy => "Privacy",
         DictationSettingsPage.General => "General",
         DictationSettingsPage.Orb => "The orb",
@@ -113,7 +113,7 @@ public static class DictationSettingsPages
         DictationSettingsPage.Dictation => "Hold your dictation key, speak, and the words land at your cursor.",
         DictationSettingsPage.Clicky => "Hold Ctrl and Win and ask about what’s on screen.",
         DictationSettingsPage.Island => "What lives at the top of your screen.",
-        DictationSettingsPage.Account => "Your own keys come first. An account is optional.",
+        DictationSettingsPage.Keys => "Connect Claude or Codex, or add your own keys.",
         DictationSettingsPage.Privacy => "What OpenClicky can see, and what it keeps.",
         DictationSettingsPage.General => "Startup, the tray and updates.",
         DictationSettingsPage.Orb => "The small narrator that shows while you dictate.",
@@ -126,7 +126,7 @@ public static class DictationSettingsPages
         DictationSettingsPage.Dictation => "",
         DictationSettingsPage.Clicky => "",
         DictationSettingsPage.Island => "",
-        DictationSettingsPage.Account => "",
+        DictationSettingsPage.Keys => "",
         DictationSettingsPage.Privacy => "",
         DictationSettingsPage.General => "",
         DictationSettingsPage.Orb => "",
@@ -139,7 +139,7 @@ public static class DictationSettingsPages
         DictationSettingsPage.Dictation or DictationSettingsPage.Orb => "#0A84FF",
         DictationSettingsPage.Clicky => "#AF52DE",
         DictationSettingsPage.Island or DictationSettingsPage.Calendars => "#1C1C1E",
-        DictationSettingsPage.Account => "#34C759",
+        DictationSettingsPage.Keys => "#34C759",
         DictationSettingsPage.Privacy => "#5E5CE6",
         _ => "#8E8E93",
     };

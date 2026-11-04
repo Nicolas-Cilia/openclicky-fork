@@ -32,6 +32,7 @@ import Foundation
 
 nonisolated struct ClaudeCodeAnswerProvider: AnswerProvider {
     let executablePath: String
+    private let usageSink: PlanUsageSink
     /// `--model`: an alias ("sonnet", "opus", "haiku") or a full model name; nil = the CLI's default.
     let model: String?
     let processRunner: PlanCLIProcessRunning
@@ -41,8 +42,10 @@ nonisolated struct ClaudeCodeAnswerProvider: AnswerProvider {
         executablePath: String,
         model: String? = nil,
         processRunner: PlanCLIProcessRunning = PlanCLIProcessRunner(),
-        timeoutSeconds: TimeInterval = 90
+        timeoutSeconds: TimeInterval = 90,
+        usageSink: PlanUsageSink = .none
     ) {
+        self.usageSink = usageSink
         self.executablePath = executablePath
         self.model = model
         self.processRunner = processRunner
@@ -89,6 +92,7 @@ nonisolated struct ClaudeCodeAnswerProvider: AnswerProvider {
         }
         try Task.checkCancellation()
         for textDelta in streamParser.finish() { handOnTextDelta(textDelta) }
+        Self.report(streamParser.summary, to: usageSink)
         if let actionLineFilter {
             let heldBackText = actionLineFilter.finish()
             if !heldBackText.isEmpty { onTextChunk(heldBackText) }
@@ -102,6 +106,14 @@ nonisolated struct ClaudeCodeAnswerProvider: AnswerProvider {
         guard !request.tools.isEmpty else { return AnswerResult(text: answerText, toolCalls: []) }
         let (spokenText, toolCalls) = PlanToolProtocol.parse(answerText: answerText, knownToolNames: Set(request.tools.map(\.name)))
         return AnswerResult(text: spokenText, toolCalls: toolCalls)
+    }
+
+    private static func report(_ summary: ClaudeCodeStreamSummary, to sink: PlanUsageSink) {
+        if let limits = summary.limits { sink.limits(.claudeCodePlan, limits) }
+        if var sample = summary.usage {
+            sample.date = Date()
+            sink.record(sample)
+        }
     }
 
     // MARK: building the call
@@ -211,7 +223,7 @@ nonisolated struct ClaudeCodeAnswerProvider: AnswerProvider {
             || lowercasedFailureText.contains("authentication_failed") {
             return "Claude Code is signed out. Open Terminal, run claude, and sign in with your Claude account."
         }
-        if lowercasedFailureText.contains("rate_limit") || lowercasedFailureText.contains("usage limit") {
+        if PlanLimitText.matches(trimmedFailureText) {
             return "Your Claude plan has hit its usage limit for now."
         }
         return trimmedFailureText.isEmpty ? "Claude Code couldn't answer." : "Claude Code couldn't answer: \(trimmedFailureText)"
@@ -227,6 +239,10 @@ nonisolated struct ClaudeCodeStreamSummary: Equatable, Sendable {
     /// Set when the run failed: the result event's text (`is_error`), or an assistant message's
     /// `error` code ("authentication_failed") when no result came.
     var failureText: String?
+    /// The result event's token counts and list-price estimate.
+    var usage: PlanUsageSample?
+    /// The last `rate_limit_event`.
+    var limits: PlanLimitSnapshot?
 }
 
 /// Turns `claude -p --output-format stream-json --include-partial-messages` output into text
@@ -273,6 +289,16 @@ nonisolated final class ClaudeCodeStreamParser: @unchecked Sendable {
         return finishedSummary
     }
 
+    static func usageSample(fromResultEvent event: [String: Any]) -> PlanUsageSample? {
+        guard let usage = event["usage"] as? [String: Any] else { return nil }
+        let count = { (key: String) in usage[key] as? Int ?? 0 }
+        return PlanUsageSample(
+            date: Date(), source: AnswerSource.claudeCodePlan.rawValue, lane: .answer,
+            inputTokens: count("input_tokens") + count("cache_read_input_tokens") + count("cache_creation_input_tokens"),
+            cachedInputTokens: count("cache_read_input_tokens"), outputTokens: count("output_tokens"),
+            estimatedCostUSD: event["total_cost_usd"] as? Double)
+    }
+
     private func handleLine(_ lineData: Data) -> String? {
         guard let event = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
               let eventType = event["type"] as? String else { return nil }
@@ -298,7 +324,11 @@ nonisolated final class ClaudeCodeStreamParser: @unchecked Sendable {
                 }
             }
             return nil
+        case "rate_limit_event":
+            if let info = event["rate_limit_info"] as? [String: Any] { state.limits = PlanLimitSnapshot.fromClaude(rateLimitInfo: info) }
+            return nil
         case "result":
+            state.usage = Self.usageSample(fromResultEvent: event)
             let resultText = event["result"] as? String
             let isError = event["is_error"] as? Bool ?? false
             let subtype = event["subtype"] as? String ?? ""

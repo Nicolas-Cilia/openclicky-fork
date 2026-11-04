@@ -20,7 +20,6 @@ public sealed class MainWindowServices
     public TakeStore? TakeStore { get; init; }
     public required TakeAudioStore AudioStore { get; init; }
     public required Preferences Preferences { get; init; }
-    public OpenClickyAuthSession Auth { get; init; } = OpenClickyAuthSession.Shared;
 
     public required ICompanionSettings Companion { get; init; }
     public required IDictationHistoryActions History { get; init; }

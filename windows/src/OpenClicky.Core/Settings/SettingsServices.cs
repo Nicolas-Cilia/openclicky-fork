@@ -164,7 +164,7 @@ public sealed record SettingsOption(string Id, string Title);
 /// <summary>What Settings → Voice shows for the voice picker.</summary>
 public sealed record VoicePickerState
 {
-    /// <summary>The voices offered, by SpeechVoiceChoice raw value ("automatic", "account", "openai", …, "kokoro", "mac").</summary>
+    /// <summary>The voices offered, by SpeechVoiceChoice raw value ("automatic", "openai", …, "kokoro", "mac").</summary>
     public required IReadOnlyList<SettingsOption> Offered { get; init; }
     public required string PickedId { get; init; }
     /// <summary>"Now: …" under the picker.</summary>
@@ -173,7 +173,7 @@ public sealed record VoicePickerState
     public bool ShowsKokoroRows { get; init; }
     /// <summary>This PC's voice row shows (speaking now, or picked).</summary>
     public bool ShowsSystemVoiceRow { get; init; }
-    /// <summary>Fewer voices are offered than exist: "More voices" points at Keys & Account.</summary>
+    /// <summary>Fewer voices are offered than exist: "More voices" points at Keys & Plans.</summary>
     public bool HasMoreVoices { get; init; }
 }
 
@@ -365,7 +365,6 @@ public sealed class DetachedSettingsServices(IProcessRunner? processes = null) :
     public static string VoiceTitle(string voiceId) => voiceId switch
     {
         "automatic" => "Automatic",
-        "account" => "Free voice (ElevenLabs)",
         "openai" => "OpenAI",
         "elevenlabs" => "ElevenLabs (your key)",
         "google" => "Google Cloud",
@@ -379,14 +378,13 @@ public sealed class DetachedSettingsServices(IProcessRunner? processes = null) :
     private static readonly string[] AllVoiceIds = ["automatic", "account", "openai", "elevenlabs", "google", "gemini", "polly", "sarvam", "kokoro", "mac"];
 
     /// <summary>Automatic's order (SpeechVoiceChoice.automaticOrder).</summary>
-    private static readonly string[] AutomaticOrder = ["openai", "elevenlabs", "google", "polly", "sarvam", "gemini", "account", "kokoro", "mac"];
+    private static readonly string[] AutomaticOrder = ["openai", "elevenlabs", "google", "polly", "sarvam", "gemini", "kokoro", "mac"];
 
-    private bool CanSpeak(string voiceId, OpenClickyShellSettings shell, bool hasAccount)
+    private bool CanSpeak(string voiceId, OpenClickyShellSettings shell)
     {
         static bool Has(string? key) => !string.IsNullOrWhiteSpace(key);
         return voiceId switch
         {
-            "account" => hasAccount,
             "openai" => Has(shell.OpenaiApiKey),
             "elevenlabs" => Has(shell.ElevenLabsApiKey),
             "google" => Has(shell.GoogleCloudApiKey),
@@ -402,17 +400,16 @@ public sealed class DetachedSettingsServices(IProcessRunner? processes = null) :
     public VoicePickerState VoicePicker(AppRegion region)
     {
         var shell = OpenClickyConfiguration.Settings;
-        var hasAccount = OpenClickyConfiguration.HasAccountToken;
         var picked = AllVoiceIds.Contains(shell.SpeechVoice) ? shell.SpeechVoice! : "automatic";
-        var offered = AllVoiceIds.Where(id => id is "automatic" or "mac" or "kokoro" || id == picked || CanSpeak(id, shell, hasAccount)).ToList();
-        // A picked voice that can't speak yet hands over to the free voice before this PC's (SpeechVoiceChoices.Resolve).
-        var candidates = picked == "automatic" ? AutomaticOrder : [picked, "account"];
-        var speaking = candidates.FirstOrDefault(id => CanSpeak(id, shell, hasAccount)) ?? "mac";
+        var offered = AllVoiceIds.Where(id => id is "automatic" or "mac" or "kokoro" || id == picked || CanSpeak(id, shell)).ToList();
+        // A picked voice that can't speak yet hands over to this PC's (SpeechVoiceChoices.Resolve).
+        var candidates = picked == "automatic" ? AutomaticOrder : [picked];
+        var speaking = candidates.FirstOrDefault(id => CanSpeak(id, shell)) ?? "mac";
         string sentence;
         if (picked != "automatic" && picked != speaking)
         {
-            var standIn = speaking == "account" ? "the free voice" : "this PC’s voice";
-            sentence = picked == "kokoro" ? $"{standIn} until Kokoro is downloaded." : $"{standIn}: {VoiceTitle(picked)} needs its key under Keys & Account.";
+            const string standIn = "this PC’s voice";
+            sentence = picked == "kokoro" ? $"{standIn} until Kokoro is downloaded." : $"{standIn}: {VoiceTitle(picked)} needs its key under Keys & Plans.";
         }
         else
         {
@@ -425,7 +422,6 @@ public sealed class DetachedSettingsServices(IProcessRunner? processes = null) :
                 "polly" => "Amazon Polly, on your own key.",
                 "sarvam" => "Sarvam, on your own key.",
                 "kokoro" => "Kokoro, on this PC. Free, offline, nothing counted.",
-                "account" => "ElevenLabs, through OpenClicky.",
                 _ => "this PC’s voice. Free, offline, nothing counted.",
             };
         }

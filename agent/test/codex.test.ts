@@ -8,7 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CodexAgent, buildChildEnv } from "../src/codex.js";
+import { CodexAgent, buildChildEnv, addTokenUsage } from "../src/codex.js";
 import { resolveConfig } from "../src/config.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -22,7 +22,7 @@ function mkCfg(overrides: Partial<Parameters<typeof resolveConfig>[0]> = {}, sce
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "oc-codex-ws-"));
   const userSkillsDir = fs.mkdtempSync(path.join(os.tmpdir(), "oc-codex-skills-"));
   if (scenario) fs.writeFileSync(path.join(codexHome, "fake-scenario.txt"), scenario);
-  return resolveConfig({ codexHome, workspace, userSkillsDir, codexBin: fakeCodex, backendUrl: "http://127.0.0.1:1", token: "t", ...overrides });
+  return resolveConfig({ codexHome, workspace, userSkillsDir, codexBin: fakeCodex, openaiBaseUrl: "http://127.0.0.1:1", ...overrides });
 }
 
 describe("buildChildEnv", () => {
@@ -43,13 +43,12 @@ describe("buildChildEnv", () => {
   });
 
   it("sets the OpenClicky variables config.toml references from cfg, never from the shell", () => {
-    const cfg = mkCfg({ token: "session-tok", openaiApiKey: "oai-key", anthropicApiKey: "anth-key", composioApiKey: "ck_test" });
-    // A shell OPENAI_API_KEY must never reach the child: Codex must always go through the backend.
+    const cfg = mkCfg({ openaiApiKey: "oai-key", anthropicApiKey: "anth-key", composioApiKey: "ck_test" });
+    // A shell OPENAI_API_KEY must never reach the child: a run uses only the key set for OpenClicky.
     const env = buildChildEnv(cfg, { OPENAI_API_KEY: "shell-openai-key", ANTHROPIC_API_KEY: "shell-anthropic-key" });
     expect(env.CODEX_HOME).toBe(cfg.codexHome);
-    expect(env.OPENCLICKY_SESSION_TOKEN).toBe("session-tok");
     expect(env.OPENCLICKY_OPENAI_KEY).toBe("oai-key");
-    expect(env.OPENCLICKY_ANTHROPIC_KEY).toBe("anth-key");
+    expect(env.OPENCLICKY_ANTHROPIC_KEY).toBeUndefined();
     expect(env.COMPOSIO_API_KEY).toBe("ck_test");
     expect(env.OPENAI_API_KEY).toBeUndefined();
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
@@ -107,4 +106,12 @@ describe("CodexAgent.run timeout and error handling (fake codex)", () => {
       await agent.stop();
     }
   }, 15_000);
+});
+
+describe("addTokenUsage", () => {
+  it("adds each model call to the turn's counts", () => {
+    const one = addTokenUsage(undefined, { inputTokens: 10, cachedInputTokens: 4, outputTokens: 2 });
+    expect(addTokenUsage(one, { inputTokens: 5, cachedInputTokens: 1, outputTokens: 3 })).toEqual({ inputTokens: 15, cachedInputTokens: 5, outputTokens: 5 });
+    expect(addTokenUsage(undefined, undefined)).toBeUndefined();
+  });
 });

@@ -17,6 +17,8 @@ struct OpenClickyAgentRunResult {
     var threadId: String?
     var status: String = "unknown"
     var errorMessage: String?
+    /// Token counts for the turn, from the CLI.
+    var usage: [String: Any]?
 }
 
 /// One Codex thread as reported by `openclicky threads list --json`.
@@ -173,6 +175,25 @@ final class OpenClickyAgentClient {
         }
     }
 
+    /// Counts the task against the plan that ran it, and notices when the plan has run out.
+    private static func reportUsage(of result: OpenClickyAgentRunResult) {
+        let onPlan = !ProviderCapabilities.current().hasOwnOpenAIKey
+        if let usage = result.usage {
+            PlanUsageLedger.shared.record(PlanUsageSample(
+                date: Date(), source: (onPlan ? AnswerSource.codexPlan : .openAI).rawValue, lane: .agent,
+                inputTokens: usage["inputTokens"] as? Int ?? 0, cachedInputTokens: usage["cachedInputTokens"] as? Int ?? 0,
+                outputTokens: usage["outputTokens"] as? Int ?? 0, estimatedCostUSD: nil))
+        }
+        guard onPlan else { return }
+        Task { @MainActor in
+            if let message = result.errorMessage, PlanLimitText.matches(message) {
+                await PlanLimitStore.shared.noteLimitHit(.codexPlan)
+            } else {
+                await PlanLimitStore.shared.refreshCodex()
+            }
+        }
+    }
+
     // MARK: - Process plumbing
 
     private func execute(
@@ -225,6 +246,7 @@ final class OpenClickyAgentClient {
                     collector.flush()
                     self.runningProcess = nil
                     var result = collector.result
+                    Self.reportUsage(of: result)
                     if terminationStatus != 0 && result.errorMessage == nil {
                         result.errorMessage = collector.lastStderrLine ?? "openclicky exited with status \(terminationStatus)"
                     }
@@ -302,6 +324,7 @@ private final class EventCollector {
             result.text = object["text"] as? String ?? streamedText
             result.status = "completed"
         case "result":
+            result.usage = object["usage"] as? [String: Any]
             result.threadId = object["threadId"] as? String
             result.artifacts = object["artifacts"] as? [String] ?? []
             result.status = object["status"] as? String ?? "completed"

@@ -115,7 +115,7 @@ public sealed record SettingsTourStep(DictationDestination Destination, string? 
         new(DictationDestination.Of(DictationSettingsPage.Clicky), "clicky.speechVoice", "how i sound", "settings-tour-voice"),
         new(DictationDestination.Of(DictationSettingsPage.Clicky), "clicky.pointer", "when i show up", "settings-tour-pointer"),
         new(DictationDestination.Of(DictationSettingsPage.Clicky), "keyboard.talk", "every shortcut", "settings-tour-shortcuts"),
-        new(DictationDestination.Of(DictationSettingsPage.Account), "account.keys", "your own keys", "settings-tour-keys"),
+        new(DictationDestination.Of(DictationSettingsPage.Keys), "keys.list", "your own keys", "settings-tour-keys"),
         new(DictationDestination.Of(DictationSettingsPage.General), "general.settingsTour", "watch it again here", "settings-tour-done"),
     ];
 }

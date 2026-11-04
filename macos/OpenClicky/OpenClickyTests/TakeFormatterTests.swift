@@ -137,10 +137,10 @@ struct TakeFormatterTests {
 
     private struct LimitPolisher: TakePolisher {
         var displayName: String { "limit" }
-        func polish(system: String, user: String) async throws -> String { throw AccountPolishError.limit(.dailyLimit) }
+        func polish(system: String, user: String) async throws -> String { throw TakePolishError.refused(vendor: "limit", status: 429, message: "") }
     }
 
-    @Test func aLimitedAccountStillGetsTheLocallyFormattedTake() async {
+    @Test func aRefusingModelStillGetsTheLocallyFormattedTake() async {
         let result = await TakeFormatter.format("hello there", context: context(), polisher: LimitPolisher(), wantsModel: true)
         #expect(result.text == "Hello there")
         #expect(result.formattingDegraded)

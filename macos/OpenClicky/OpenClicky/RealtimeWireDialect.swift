@@ -25,25 +25,23 @@ nonisolated enum RealtimeVoiceProvider: String, CaseIterable, Sendable {
         }
     }
 
-    /// The provider the next connection uses, with how it pays: an own key goes straight to its
-    /// vendor; with no realtime key, an account's token gets OpenAI through the backend.
+    /// The provider the next connection uses: an own key goes straight to its vendor.
     /// `preferred` is the person's pick (nil: automatic, OpenAI first, its prompts and pointing
     /// were tuned on it). A pick without its key falls back to automatic.
     static func choose(credentials: ProviderCredentials, preferred: RealtimeVoiceProvider?) -> RealtimeVoiceProvider? {
         func usable(_ provider: RealtimeVoiceProvider) -> Bool {
             switch provider {
-            case .openAI: return credentials.openAIKey != nil || credentials.accountToken != nil
+            case .openAI: return credentials.openAIKey != nil
             case .gemini: return credentials.geminiKey != nil
             }
         }
         if let preferred, usable(preferred) { return preferred }
         if credentials.openAIKey != nil { return .openAI }
         if credentials.geminiKey != nil { return .gemini }
-        if credentials.accountToken != nil { return .openAI }
         return nil
     }
 
-    /// Whether any own key can run realtime voice (an account alone is decided by its plan).
+    /// Whether any own key can run realtime voice.
     static func hasOwnKey(_ credentials: ProviderCredentials) -> Bool {
         credentials.openAIKey != nil || credentials.geminiKey != nil
     }
