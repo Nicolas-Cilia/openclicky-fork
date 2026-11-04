@@ -49,6 +49,15 @@ struct SettingsTourTests {
     }
 }
 
+struct SettingsTourStartTests {
+    @Test func itPlaysOnceAtGeneralAfterTheWelcomeTour() {
+        #expect(SettingsTourController.startsOnItsOwn(page: .general, welcomeTourIsFinished: true, hasPlayed: false))
+        #expect(!SettingsTourController.startsOnItsOwn(page: .general, welcomeTourIsFinished: false, hasPlayed: false))
+        #expect(!SettingsTourController.startsOnItsOwn(page: .general, welcomeTourIsFinished: true, hasPlayed: true))
+        #expect(!SettingsTourController.startsOnItsOwn(page: .keys, welcomeTourIsFinished: true, hasPlayed: false))
+    }
+}
+
 struct PointerPresenceDefaultTests {
     @Test func thePointerStaysForTheFirstFewUses() {
         #expect(PointerPresenceDefault.presenceToSwitchTo(useCount: 4, personChoseOne: false, current: .always) == nil)

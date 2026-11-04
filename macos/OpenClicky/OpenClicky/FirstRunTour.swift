@@ -468,8 +468,9 @@ final class FirstRunTourController: ObservableObject {
             KokoroVoice.shared.download()
             advance()
         case .done:
-            companionManager.showSettings(.general)
+            // Finished first: Settings only starts its own tour once this one is done.
             finish()
+            companionManager.showSettings(.general)
         case .openAtLogin:
             let isOn = SMAppServiceBridge.set(enabled: true)
             AppLog.append("open at login: \(isOn ? "switched on" : "refused")")

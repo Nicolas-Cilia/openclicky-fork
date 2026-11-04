@@ -123,6 +123,11 @@ final class SettingsTourController: ObservableObject {
 
     static var hasPlayed: Bool { UserDefaults.standard.bool(forKey: hasPlayedKey) }
 
+    /// Plays once, the first time Settings opens at General after the welcome tour.
+    nonisolated static func startsOnItsOwn(page: DictationSettingsPage, welcomeTourIsFinished: Bool, hasPlayed: Bool) -> Bool {
+        page == .general && welcomeTourIsFinished && !hasPlayed
+    }
+
     /// Plays the tour in `window`, whose pages `model` switches.
     func start(in window: NSWindow, model: DictationWindowModel) {
         guard !isRunning, let companionManager else { return }
@@ -146,7 +151,7 @@ final class SettingsTourController: ObservableObject {
     private func run(in window: NSWindow, model: DictationWindowModel, companionManager: CompanionManager) async {
         companionManager.beginSettingsTourPointing()
         // The window has just opened: let it lay out before the first flight.
-        guard await pause(seconds: 0.8) else { return }
+        guard await pause(seconds: 0.3) else { return }
         for step in SettingsTourStep.all {
             if model.destination != step.destination || model.isSearching {
                 let sidebarID = SettingsTourTargets.sidebarTargetID(for: step.destination)
@@ -162,7 +167,11 @@ final class SettingsTourController: ObservableObject {
             let targetID = step.targetID ?? SettingsTourTargets.sidebarTargetID(for: step.destination)
             if step.targetID != nil {
                 SettingsTourTargets.shared.scrollRequest = targetID
-                guard await pause(seconds: 0.5) else { return }
+                // A long page takes a moment to scroll: wait for the row, not a fixed time.
+                for _ in 0..<15 {
+                    guard await pause(seconds: 0.1) else { return }
+                    if SettingsTourTargets.shared.screenPoint(for: targetID, in: window) != nil { break }
+                }
             }
             if let targetPoint = SettingsTourTargets.shared.screenPoint(for: targetID, in: window) {
                 companionManager.pointForSettingsTour(at: targetPoint, bubble: step.bubble)

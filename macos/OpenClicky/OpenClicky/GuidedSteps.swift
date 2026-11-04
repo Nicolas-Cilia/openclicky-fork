@@ -53,18 +53,20 @@ enum GuidedStepMarker {
 /// over?") is still a new question.
 enum GuidedStepContinuePhrase {
     /// Spoken politeness and filler around the phrase, dropped before matching ("ok continue please").
-    private static let fillerWords: Set<String> = ["ok", "okay", "alright", "all", "right", "please", "clicky", "so", "um", "uh", "now", "and"]
+    private static let fillerWords: Set<String> = ["ok", "okay", "alright", "all", "right", "please", "clicky", "so", "um", "uh", "and", "yeah", "yep", "cool", "great"]
 
-    /// What is left once the filler is gone, as whole phrases.
-    private static let continuePhrases: Set<String> = [
-        "continue", "next", "next step", "go on", "go ahead", "keep going", "carry on", "move on",
-        "done", "i'm done", "im done", "i am done", "did it", "i did it", "i did that", "got it",
-        "ready", "i'm ready", "im ready", "i am ready", "what's next", "whats next", "what next",
-        "what now", "then what", "let's continue", "lets continue", "continue please",
-    ]
+    /// What is left once the filler is gone, as whole phrases, one after another ("i did that what's next").
+    private static let continuePhrases: [[String]] = [
+        "continue", "next", "next step", "the next step", "go on", "go ahead", "keep going", "carry on", "move on",
+        "done", "all done", "i'm done", "im done", "i am done", "that's done", "thats done",
+        "did it", "did that", "i did", "i did it", "i did that", "i've done it", "ive done it", "i've done that", "ive done that",
+        "finished", "i finished", "i've finished", "ive finished", "i clicked it", "i clicked that", "got it", "got that",
+        "ready", "i'm ready", "im ready", "i am ready", "what's next", "whats next", "what next", "what's the next step", "whats the next step",
+        "what do i do next", "what should i do next", "what now", "continue now", "next now", "i'm done now", "im done now", "done now", "what do i do now", "then what", "let's continue", "lets continue", "continue please",
+    ].map { $0.split(separator: " ").map(String.init) }.sorted { $0.count > $1.count }
 
     /// Longer than this (after the filler is dropped) is never a continue phrase.
-    static let maximumWordCount = 4
+    static let maximumWordCount = 10
 
     static func isContinue(_ transcript: String) -> Bool {
         let lowercasedTranscript = transcript.lowercased().replacingOccurrences(of: "’", with: "'")
@@ -73,7 +75,13 @@ enum GuidedStepContinuePhrase {
             .filter { !$0.isEmpty }
         let meaningfulWords = wordsWithoutPunctuation.filter { !fillerWords.contains($0) }
         guard !meaningfulWords.isEmpty, meaningfulWords.count <= maximumWordCount else { return false }
-        return continuePhrases.contains(meaningfulWords.joined(separator: " "))
+        // Every word has to belong to a phrase: "what's the next tab over" has words left over.
+        var remainingWords = meaningfulWords[...]
+        while !remainingWords.isEmpty {
+            guard let phrase = continuePhrases.first(where: { remainingWords.starts(with: $0) }) else { return false }
+            remainingWords = remainingWords.dropFirst(phrase.count)
+        }
+        return true
     }
 }
 

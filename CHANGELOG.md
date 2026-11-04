@@ -15,6 +15,15 @@ release page shows each platform under its own heading once that platform's file
 (`scripts/update-release-page.sh`, run by the Windows release workflow), followed by a
 downloads table. Under a platform heading, don't start bullets with "Windows:" again.
 
+## 0.11.2
+
+### All platforms
+
+- **Questions get answers, step by step.** Asking how to do something now gets the normal answer again, so guides wait for you between steps. Only a request that starts with the work, like "create a file", runs as an agent task.
+- **Guides keep up with how you talk.** Saying something like "okay I did that, what's next" now moves a guide on, where it used to restart it. The step number on the island is gone too.
+- **No more reading out asterisks.** Formatting is taken out before anything is spoken.
+- **The Settings tour starts when you first open Settings.** It no longer waits for a second visit, and on Mac it starts sooner.
+
 ## 0.11.1
 
 ### All platforms
