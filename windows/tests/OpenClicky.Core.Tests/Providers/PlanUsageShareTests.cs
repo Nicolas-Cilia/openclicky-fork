@@ -32,16 +32,63 @@ public class PlanUsageShareTests
     [Fact]
     public void ClaudesShareIsOursAgainstWhatThisComputerLogged()
     {
-        var share = PlanUsageShare.ClaudeFraction(Window(0.2), [Sample(AnswerSource.ClaudeCodePlan)], [new LocalClaudeUsage(Now, 3000)]);
+        var share = PlanUsageShare.ClaudeFraction(Window(0.2), [Sample(AnswerSource.ClaudeCodePlan)], [new LocalClaudeUsage(Now, 3000)], Empty());
         Assert.Equal(0.05, share!.Value, 4);
     }
 
     [Fact]
     public void ClaudesShareOnlyCountsThisWindowAndThisPlan()
     {
-        Assert.Null(PlanUsageShare.ClaudeFraction(Window(0.2), [Sample(AnswerSource.ClaudeCodePlan, 5), Sample(AnswerSource.CodexPlan)], []));
-        Assert.Null(PlanUsageShare.ClaudeFraction(Window(0.2, "seven day opus"), [Sample(AnswerSource.ClaudeCodePlan)], []));
-        Assert.Equal(0.2, PlanUsageShare.ClaudeFraction(Window(0.2), [Sample(AnswerSource.ClaudeCodePlan)], [new LocalClaudeUsage(Now.AddHours(-5), 9999)])!.Value, 4);
+        Assert.Null(PlanUsageShare.ClaudeFraction(Window(0.2), [Sample(AnswerSource.ClaudeCodePlan, 5), Sample(AnswerSource.CodexPlan)], [], Empty()));
+        Assert.Null(PlanUsageShare.ClaudeFraction(Window(0.2, "seven day opus"), [Sample(AnswerSource.ClaudeCodePlan)], [], Empty()));
+        Assert.Equal(0.2, PlanUsageShare.ClaudeFraction(Window(0.2), [Sample(AnswerSource.ClaudeCodePlan)], [new LocalClaudeUsage(Now.AddHours(-5), 9999)], Empty())!.Value, 4);
+    }
+
+    /// <summary>A bar that was empty when OpenClicky first used it, so only the logs limit the share.</summary>
+    private static IReadOnlyList<MeasuredPlanWindow> Empty() => [new MeasuredPlanWindow("5 hours", Now.AddHours(1), 0)];
+
+    [Fact]
+    public void WhatWasOnTheBarBeforeOpenClickyIsNeverItsShare()
+    {
+        // A fresh install: 8% used elsewhere, no logs on this computer, and one test request.
+        var baselines = PlanUsageShare.UpdatingBaselines([], Snapshot(0.08));
+        Assert.Equal(0, PlanUsageShare.ClaudeFraction(Window(0.08), [Sample(AnswerSource.ClaudeCodePlan)], [], baselines));
+        Assert.Equal("under 1% OpenClicky", PlanUsageShare.Label(0));
+
+        // The bar rises to 11%: at most that 3 points can be OpenClicky's.
+        Assert.Equal(0.03, PlanUsageShare.ClaudeFraction(Window(0.11), [Sample(AnswerSource.ClaudeCodePlan)], [], baselines)!.Value, 4);
+    }
+
+    [Fact]
+    public void TheLogsStillLimitTheShareOnceTheBarHasRisen()
+    {
+        var baselines = PlanUsageShare.UpdatingBaselines([], Snapshot(0.10));
+        Assert.Equal(0.05, PlanUsageShare.ClaudeFraction(Window(0.20), [Sample(AnswerSource.ClaudeCodePlan)], [new LocalClaudeUsage(Now, 3000)], baselines)!.Value, 4);
+    }
+
+    [Fact]
+    public void ABarWithNoBaselineShowsNoShareRatherThanAWrongOne() =>
+        Assert.Null(PlanUsageShare.ClaudeFraction(Window(0.2), [Sample(AnswerSource.ClaudeCodePlan)], [], []));
+
+    [Fact]
+    public void ABaselineLastsItsWindowAndANewWindowGetsItsOwn()
+    {
+        var first = PlanUsageShare.UpdatingBaselines([], Snapshot(0.08));
+        Assert.Equal(0.08, PlanUsageShare.UpdatingBaselines(first, Snapshot(0.30))[0].UsedFraction);
+        Assert.Equal(0.01, PlanUsageShare.UpdatingBaselines(first, Snapshot(0.01, resetsInHours: 5))[0].UsedFraction);
+    }
+
+    [Fact]
+    public void TheStoreKeepsClaudesBaselinesAcrossLaunches()
+    {
+        var preferences = Preferences.InMemory();
+        var store = new PlanLimitStore(preferences, new PlanAvailability(preferences), () => Task.FromResult<PlanLimitSnapshot?>(null));
+        store.Ingest(Snapshot(0.08), AnswerSource.ClaudeCodePlan);
+        store.Ingest(Snapshot(0.09), AnswerSource.ClaudeCodePlan);
+        store.Ingest(Snapshot(0.50), AnswerSource.CodexPlan);
+        Assert.Equal(0.08, store.ClaudeBaselines[0].UsedFraction);
+        var reopened = new PlanLimitStore(preferences, new PlanAvailability(preferences), () => Task.FromResult<PlanLimitSnapshot?>(null));
+        Assert.Equal(store.ClaudeBaselines, reopened.ClaudeBaselines);
     }
 
     [Fact]

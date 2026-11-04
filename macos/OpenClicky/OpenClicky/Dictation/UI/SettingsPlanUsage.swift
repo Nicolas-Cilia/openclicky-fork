@@ -22,7 +22,7 @@ struct PlanUsageRow: View {
     private func openClickyFraction(of window: PlanLimitWindow) -> Double? {
         plan == .codexPlan
             ? PlanUsageShare.codexFraction(of: window, measured: limits.codexMeasured)
-            : PlanUsageShare.claudeFraction(of: window, samples: samples, localUsage: localClaudeUsage)
+            : PlanUsageShare.claudeFraction(of: window, samples: samples, localUsage: localClaudeUsage, baselines: limits.claudeBaselines)
     }
 
     private var shareNote: String? {

@@ -3,6 +3,8 @@
 //   - Claude: OpenClicky's tokens against the tokens Claude Code logged on this computer
 //     (%USERPROFILE%\.claude\projects; only the counts are read), as a share of the bar. Use on
 //     other computers or on the Claude website isn't in those logs, so the share can come out high.
+//     It never exceeds how far the bar has risen since OpenClicky first used this window, so what
+//     was already on the bar is never counted as OpenClicky's.
 //   - Codex: how far the bar moved across each OpenClicky request, added up until the window
 //     resets. Anything else using Codex at that moment is counted too.
 
@@ -54,15 +56,22 @@ public static class PlanUsageShare
         return (a - b).Duration() <= SameWindowTolerance;
     }
 
-    /// <summary>OpenClicky's part of a Claude bar; null when it isn't known or OpenClicky used none of this window.</summary>
-    public static double? ClaudeFraction(PlanLimitWindow window, IEnumerable<PlanUsageSample> samples, IEnumerable<LocalClaudeUsage> localUsage)
+    /// <summary>OpenClicky's part of a Claude bar; null when it isn't known or OpenClicky used none of this window. <paramref name="baselines"/> is how full each bar was when OpenClicky first used its window.</summary>
+    public static double? ClaudeFraction(PlanLimitWindow window, IEnumerable<PlanUsageSample> samples, IEnumerable<LocalClaudeUsage> localUsage, IReadOnlyList<MeasuredPlanWindow> baselines)
     {
         if (Start(window) is not { } start) return null;
+        if (baselines.FirstOrDefault(entry => entry.Title == window.Title && IsSameWindow(entry.ResetsAt, window.ResetsAt)) is not { } baseline) return null;
         var ours = samples.Where(sample => sample.Source == AnswerSource.ClaudeCodePlan.Id() && sample.Date >= start).Sum(Weight);
         if (ours <= 0) return null;
         var others = localUsage.Where(usage => usage.Date >= start).Sum(usage => usage.Weight);
-        return window.UsedFraction * ours / (ours + others);
+        return Math.Min(window.UsedFraction * ours / (ours + others), Math.Max(0, window.UsedFraction - baseline.UsedFraction));
     }
+
+    /// <summary>Remembers how full each bar is the first time it is seen in its window. Claude only reports its limits on OpenClicky's own requests, so that is when OpenClicky first used the window.</summary>
+    public static IReadOnlyList<MeasuredPlanWindow> UpdatingBaselines(IReadOnlyList<MeasuredPlanWindow> baselines, PlanLimitSnapshot snapshot) =>
+        [.. snapshot.Windows.Select(window =>
+            baselines.FirstOrDefault(entry => entry.Title == window.Title && IsSameWindow(entry.ResetsAt, window.ResetsAt))
+            ?? new MeasuredPlanWindow(window.Title, window.ResetsAt, window.UsedFraction))];
 
     public static string ClaudeLogsFolder => Path.Combine(OpenClickyPaths.HomeDirectory, ".claude", "projects");
 

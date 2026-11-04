@@ -263,7 +263,7 @@ internal sealed partial class SettingsRowFactory
         private double? OpenClickyFraction(PlanLimitWindow window, IReadOnlyList<PlanUsageSample> samples) =>
             plan == AnswerSource.CodexPlan
                 ? PlanUsageShare.CodexFraction(window, PlanLimitStore.Shared.CodexMeasured)
-                : PlanUsageShare.ClaudeFraction(window, samples, localClaudeUsage);
+                : PlanUsageShare.ClaudeFraction(window, samples, localClaudeUsage, PlanLimitStore.Shared.ClaudeBaselines);
 
         /// <summary>A limit's bar: how full it is, with OpenClicky's rough part highlighted at the start.</summary>
         private static UIElement Bar(double used, double? openClicky)
