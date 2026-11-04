@@ -169,7 +169,7 @@ public static class ProviderKeys
         ProviderKey.OpenAI => "Answers, fast voice and hands-free.",
         ProviderKey.Anthropic => "Claude answers your questions about the screen.",
         ProviderKey.OpenRouter => "One key for Claude, GPT, Gemini, Llama and more.",
-        ProviderKey.Gemini => "Answers and a voice. From Google AI Studio.",
+        ProviderKey.Gemini => "Answers and a voice. An AI Studio key, separate from any AI Pro or Ultra plan.",
         ProviderKey.Groq => "Very fast answers on open models.",
         ProviderKey.Mistral => "Mistral’s own models.",
         ProviderKey.Xai => "Grok, from xAI.",
@@ -179,6 +179,13 @@ public static class ProviderKeys
         ProviderKey.AmazonPolly => "Speaks answers in Amazon’s neural voices. Paste access key ID:secret key, then :region if it isn’t us-east-1.",
         _ => "Finds the song you asked for. Paste client id:client secret from developer.spotify.com; without it OpenClicky’s own lookup is used.",
     };
+
+    /// <summary>
+    /// Where to get a key, for the provider with no sign-in to offer instead: Google closed Gemini CLI
+    /// to personal plans on 2026-06-18, and its replacement's terms bar third-party apps.
+    /// </summary>
+    public static string? KeyPageUrl(this ProviderKey provider) =>
+        provider == ProviderKey.Gemini ? "https://aistudio.google.com/apikey" : null;
 
     public static string Placeholder(this ProviderKey provider) => provider switch
     {
@@ -280,12 +287,11 @@ public static class PlanSubscription
     /// <summary>The plan row's copy (PlanSubscriptionRow.detail); null status is still checking.</summary>
     public static string Detail(AnswerSource plan, PlanCliStatus? status, bool isOn)
     {
-        var command = plan == AnswerSource.ClaudeCodePlan ? "claude" : "codex login";
         return status switch
         {
             null => "Checking…",
             PlanCliStatus.NotInstalled => plan == AnswerSource.ClaudeCodePlan ? "Claude Code isn’t installed on this PC." : "Codex isn’t installed on this PC.",
-            PlanCliStatus.InstalledSignedOut => $"Installed, not signed in. Run “{command}” in a terminal and sign in.",
+            PlanCliStatus.InstalledSignedOut => $"Installed, not signed in. Press Sign In, or run “{Answers.PlanSignIn.Command(plan)}” in a terminal.",
             _ => isOn ? "Signed in. Answering with your plan when it’s the one picked (Settings → Clicky)." : "Signed in. Switch on to answer with your plan.",
         };
     }

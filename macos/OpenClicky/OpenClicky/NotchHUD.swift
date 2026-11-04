@@ -748,19 +748,16 @@ final class NotchHUDManager {
     let shelf = ShelfStore(directory: ShelfStore.defaultDirectory, iconRenderer: ShelfStore.finderIcon)
     /// One per app: the coding agents' session logs, polled only while the component is on.
     let agentSessions = AgentSessionWatcher(roots: .standard)
-    /// One per app: Claude's plan limits, asked only while a Coding agents row is on screen.
-    let claudeUsage = ClaudeUsageStore.live()
     /// One per app: what Music or Spotify is playing, asked only while the Now playing plugin is on.
     let media = MediaStore(source: AppleScriptMediaSource())
 
-    /// The extras that need a background hand (the agents watcher, the usage store) follow
+    /// The extras that need a background hand (the agents watcher) follow
     /// their switch in Settings.
     private func syncOptionalComponents() {
         let enabled = instances.first?.model.enabledComponentIDs
             ?? IslandComponentSettings.enabledIDs(in: IslandComponentRegistry.all, settings: IslandComponentSettings(defaults: .standard))
         let agentsOn = enabled.contains(IslandPluginRegistry.agentsID)
         agentSessions.setEnabled(agentsOn)
-        claudeUsage.setEnabled(agentsOn)
         media.setEnabled(enabled.contains(IslandPluginRegistry.mediaID))
     }
     #if DEBUG

@@ -460,13 +460,13 @@ public sealed class SettingsCatalog
         {
             Id = "keys.claudeCodePlan", Section = "Subscriptions",
             Title = "Claude Code (your Claude plan)", Detail = "Answer questions through Claude Code, signed in to your Claude plan.",
-            Keywords = ["claude code", "claude plan", "pro", "max", "subscription", "anthropic"],
+            Keywords = ["claude code", "claude plan", "pro", "max", "subscription", "anthropic", "sign in", "login", "browser"],
         },
         new()
         {
             Id = "keys.codexPlan", Section = "Subscriptions",
             Title = "Codex (your ChatGPT plan)", Detail = "Answer questions through Codex, signed in with ChatGPT.",
-            Keywords = ["codex", "chatgpt", "plus", "pro", "subscription", "openai"],
+            Keywords = ["codex", "chatgpt", "plus", "pro", "subscription", "openai", "sign in", "login", "browser"],
         },
         new()
         {
@@ -489,13 +489,13 @@ public sealed class SettingsCatalog
         new()
         {
             Id = "keys.plansNote", Section = "Subscriptions", Chrome = SettingsItemChrome.Footer,
-            Title = "What a plan can do", Detail = PlansNoteText, Keywords = ["subscription", "plan"],
+            Title = "What a plan can do", Detail = PlansNoteText, Keywords = ["subscription", "plan", "risk", "ban", "terms", "anthropic"],
         },
     ];
 
     public const string KeysNoteText = "Your keys go straight to that provider. Stored in %USERPROFILE%\\.openclicky\\shell.json.";
 
-    public const string PlansNoteText = "A plan answers questions, points, and does quick actions like opening apps or making folders. Bigger tasks need the agent. Codex answers in one go, a few seconds after you ask.";
+    public const string PlansNoteText = "A plan answers questions, points, and does quick actions like opening apps or making folders. Bigger tasks need the agent. Codex answers in one go, a few seconds after you ask.\n\nUsing your Claude plan here is at your own risk. OpenClicky is an independent project, not made or approved by Anthropic. Anthropic’s terms limit using subscription logins with other apps, and it can restrict or ban accounts without notice. OpenClicky’s authors aren’t responsible if that happens. An Anthropic API key is the route Anthropic supports for other apps.";
 
     // MARK: - Privacy & Security (SettingsPrivacyPage.swift)
 

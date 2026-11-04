@@ -4,7 +4,7 @@
 //
 //  The Coding agents plugin's row: up to three session rows (agent, project, what it is doing, a
 //  running bar while live) on the left, Claude's two plan-limit rings on the right. The app's one
-//  watcher and usage store live here; the island manager switches them with the plugin.
+//  watcher lives here; the island manager switches it with the plugin.
 //
 
 using System.Windows;
@@ -14,6 +14,7 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using OpenClicky.Core.Plugins.CodingAgents;
 using OpenClicky.Core.Plugins.SystemStats;
+using OpenClicky.Core.Providers;
 using OpenClicky.Windows.Island;
 using OpenClicky.Windows.Plugins.SystemStats;
 using OpenClicky.Windows.Theme;
@@ -24,15 +25,9 @@ internal sealed class AgentsIslandView : Grid, IIslandContent
 {
     /// <summary>The app's one session watcher (the Mac's NotchHUDManager.agentSessions).</summary>
     public static AgentSessionWatcher Sessions { get; } = new(AgentLogRoots.Standard);
-    /// <summary>The app's one plan-limits store (the Mac's NotchHUDManager.claudeUsage).</summary>
-    public static ClaudeUsageStore Usage { get; } = ClaudeUsageStore.Live();
 
-    /// <summary>The plugin's switch: on, the watcher polls slowly (for the peek line) and the limits may be asked for.</summary>
-    public static void SetEnabled(bool isEnabled)
-    {
-        Sessions.SetEnabled(isEnabled);
-        Usage.SetEnabled(isEnabled);
-    }
+    /// <summary>The plugin's switch: on, the watcher polls slowly (for the peek line).</summary>
+    public static void SetEnabled(bool isEnabled) => Sessions.SetEnabled(isEnabled);
 
     private readonly StackPanel sessionsColumn = new() { VerticalAlignment = VerticalAlignment.Top };
     private readonly ContentControl limits = new() { Focusable = false, VerticalAlignment = VerticalAlignment.Top };
@@ -50,17 +45,15 @@ internal sealed class AgentsIslandView : Grid, IIslandContent
         Loaded += (_, _) =>
         {
             Sessions.Changed += OnStoreChanged;
-            Usage.Changed += OnStoreChanged;
+            PlanLimitStore.Shared.Changed += OnStoreChanged;
             Sessions.BeginWatching();
-            Usage.BeginWatching();
             Refresh();
         };
         Unloaded += (_, _) =>
         {
             Sessions.Changed -= OnStoreChanged;
-            Usage.Changed -= OnStoreChanged;
+            PlanLimitStore.Shared.Changed -= OnStoreChanged;
             Sessions.EndWatching();
-            Usage.EndWatching();
         };
     }
 
@@ -73,7 +66,7 @@ internal sealed class AgentsIslandView : Grid, IIslandContent
     public void Refresh()
     {
         RefreshSessions();
-        limits.Content = LimitsView(Usage.State);
+        limits.Content = LimitsView(ClaudeLimitRings.Rings(PlanLimitStore.Shared.Snapshot(AnswerSource.ClaudeCodePlan), DateTimeOffset.Now));
     }
 
     private void RefreshSessions()
@@ -129,13 +122,8 @@ internal sealed class AgentsIslandView : Grid, IIslandContent
         }
     }
 
-    private static FrameworkElement? LimitsView(ClaudeUsageState state) => state switch
-    {
-        ClaudeUsageState.SignInNeeded => LimitsNote("sign in to claude to see limits"),
-        ClaudeUsageState.CredentialsRefused => LimitsNote("can't read claude's sign-in to see limits"),
-        ClaudeUsageState.Figures figures => UsageRings(figures.Usage, figures.IsStale),
-        _ => null,
-    };
+    private static FrameworkElement LimitsView(IReadOnlyList<ClaudeLimitRing> rings) =>
+        rings.Count == 0 ? LimitsNote("claude limits show after clicky answers on your plan") : UsageRings(rings);
 
     private static TextBlock LimitsNote(string text)
     {
@@ -145,47 +133,49 @@ internal sealed class AgentsIslandView : Grid, IIslandContent
         return note;
     }
 
-    private static StackPanel UsageRings(ClaudeUsage usage, bool isStale)
+    private static StackPanel UsageRings(IReadOnlyList<ClaudeLimitRing> rings)
     {
-        var rings = new StackPanel { Orientation = Orientation.Horizontal, Opacity = isStale ? 0.5 : 1 };
-        rings.Children.Add(UsageRing("5 h", usage.FiveHour));
-        var sevenDay = UsageRing("7 d", usage.SevenDay);
-        sevenDay.Margin = new Thickness(10, 0, 0, 0);
-        rings.Children.Add(sevenDay);
-        return rings;
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        foreach (var ring in rings)
+        {
+            var element = UsageRing(ring);
+            if (row.Children.Count > 0) element.Margin = new Thickness(10, 0, 0, 0);
+            row.Children.Add(element);
+        }
+        return row;
     }
 
     /// <summary>One plan window: a ring with the percentage inside, the window's name and its reset under it.</summary>
-    private static FrameworkElement UsageRing(string label, UsageWindow window)
+    private static FrameworkElement UsageRing(ClaudeLimitRing limitRing)
     {
-        var color = window.Fraction >= 1 ? DS.HUD.PointerBrush : window.Fraction > 0.8 ? DS.Brush(DS.Colors.Warning) : DS.HUD.TextBrush;
+        var color = limitRing.Fraction >= 1 ? DS.HUD.PointerBrush : limitRing.Fraction > 0.8 ? DS.Brush(DS.Colors.Warning) : DS.HUD.TextBrush;
         var ring = new Grid { Width = SystemIslandView.RingSize, Height = SystemIslandView.RingSize, HorizontalAlignment = HorizontalAlignment.Center };
         ring.Children.Add(new Ellipse { Stroke = DS.Brush(Colors.White, 0.12), StrokeThickness = SystemIslandView.RingThickness });
-        if (window.Fraction > 0)
+        if (limitRing.Fraction > 0)
         {
             ring.Children.Add(new Path
             {
-                Data = SystemIslandView.Arc(window.Fraction),
+                Data = SystemIslandView.Arc(limitRing.Fraction),
                 Stroke = color,
                 StrokeThickness = SystemIslandView.RingThickness,
                 StrokeStartLineCap = PenLineCap.Round,
                 StrokeEndLineCap = PenLineCap.Round,
             });
         }
-        var percent = IslandUi.Text(SystemStatsFormatter.Percent(window.Fraction), 8, DS.HUD.TextBrush, FontWeights.SemiBold);
+        var percent = IslandUi.Text(SystemStatsFormatter.Percent(limitRing.Fraction), 8, DS.HUD.TextBrush, FontWeights.SemiBold);
         percent.HorizontalAlignment = HorizontalAlignment.Center;
         percent.VerticalAlignment = VerticalAlignment.Center;
         ring.Children.Add(percent);
         var stack = new StackPanel { Width = 78 };
         stack.Children.Add(ring);
-        var name = IslandUi.Text(label, 10, DS.HUD.Text2Brush);
+        var name = IslandUi.Text(limitRing.Label, 10, DS.HUD.Text2Brush);
         name.HorizontalAlignment = HorizontalAlignment.Center;
         name.Margin = new Thickness(0, 3, 0, 0);
         stack.Children.Add(name);
-        var reset = IslandUi.Text(ClaudeUsagePolicy.ResetText(window.ResetsAt, DateTimeOffset.Now), 9, DS.HUD.Text3Brush, trimming: TextTrimming.CharacterEllipsis);
+        var reset = IslandUi.Text(ClaudeLimitRings.ResetText(limitRing.ResetsAt, DateTimeOffset.Now), 9, DS.HUD.Text3Brush, trimming: TextTrimming.CharacterEllipsis);
         reset.HorizontalAlignment = HorizontalAlignment.Center;
         stack.Children.Add(reset);
-        AutomationProperties.SetName(stack, $"{label} window {SystemStatsFormatter.Percent(window.Fraction)} used");
+        AutomationProperties.SetName(stack, $"{limitRing.Label} window {SystemStatsFormatter.Percent(limitRing.Fraction)} used");
         return stack;
     }
 }

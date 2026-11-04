@@ -15,11 +15,11 @@ struct AgentsIslandComponent: IslandComponent {
     let symbolName = "terminal"
     let preferredHeight: CGFloat = 76
     let isPlugin = true
-    let settingsDetail: String? = "Follows Claude Code and Codex sessions on this Mac from their own logs. macOS asks once to let OpenClicky read Claude Code's sign-in for the plan limits."
+    let settingsDetail: String? = "Follows Claude Code and Codex sessions on this Mac from their own logs. Claude's plan limits show once Clicky has answered on your Claude plan."
     func isAvailable(in context: IslandContext) -> Bool { true }
     @MainActor func makeView(companionManager: CompanionManager, model: NotchHUDModel) -> AnyView {
         let hud = companionManager.notchHUDManager
-        return AnyView(AgentsIslandView(sessions: hud.agentSessions, usage: hud.claudeUsage, model: model))
+        return AnyView(AgentsIslandView(sessions: hud.agentSessions, model: model))
     }
 }
 
@@ -34,7 +34,7 @@ struct AgentRow: Equatable, Identifiable {
 
 struct AgentsIslandView: View {
     @ObservedObject var sessions: AgentSessionWatcher
-    @ObservedObject var usage: ClaudeUsageStore
+    @ObservedObject private var planLimits = PlanLimitStore.shared
     @ObservedObject var model: NotchHUDModel
 
     static let maximumRows = 3
@@ -67,11 +67,9 @@ struct AgentsIslandView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             sessions.beginWatching()
-            usage.beginWatching()
         }
         .onDisappear {
             sessions.endWatching()
-            usage.endWatching()
         }
     }
 
@@ -120,19 +118,13 @@ struct AgentsIslandView: View {
     }
 
     @ViewBuilder private var limits: some View {
-        switch usage.state {
-        case .none:
-            EmptyView()
-        case .signInNeeded:
-            limitsNote("sign in to claude to see limits")
-        case .keychainRefused:
-            limitsNote("allow keychain access to see limits")
-        case .figures(let figures, let stale):
+        let rings = ClaudeLimitRings.rings(from: planLimits.snapshots[.claudeCodePlan], now: Date())
+        if rings.isEmpty {
+            limitsNote("claude limits show after clicky answers on your plan")
+        } else {
             HStack(spacing: 10) {
-                UsageRing(label: "5 h", window: figures.fiveHour)
-                UsageRing(label: "7 d", window: figures.sevenDay)
+                ForEach(rings, id: \.label) { UsageRing(ring: $0) }
             }
-            .opacity(stale ? 0.5 : 1)
         }
     }
 
@@ -147,12 +139,11 @@ struct AgentsIslandView: View {
 
 /// One plan window: a ring with the percentage inside, the window's name and its reset under it.
 private struct UsageRing: View {
-    let label: String
-    let window: UsageWindow
+    let ring: ClaudeLimitRing
 
     private var color: Color {
-        if window.fraction >= 1 { return DS.HUD.pointer }
-        if window.fraction > 0.8 { return DS.Colors.warning }
+        if ring.fraction >= 1 { return DS.HUD.pointer }
+        if ring.fraction > 0.8 { return DS.Colors.warning }
         return DS.HUD.text
     }
 
@@ -161,19 +152,19 @@ private struct UsageRing: View {
             ZStack {
                 Circle().stroke(Color.white.opacity(0.12), lineWidth: 3)
                 Circle()
-                    .trim(from: 0, to: CGFloat(min(max(window.fraction, 0), 1)))
+                    .trim(from: 0, to: CGFloat(min(max(ring.fraction, 0), 1)))
                     .stroke(color, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                Text(SystemStatsFormatter.percent(window.fraction))
+                Text(SystemStatsFormatter.percent(ring.fraction))
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(DS.HUD.text)
                     .minimumScaleFactor(0.7)
             }
             .frame(width: 28, height: 28)
-            Text(label)
+            Text(ring.label)
                 .font(.system(size: 10))
                 .foregroundColor(DS.HUD.text2)
-            Text(ClaudeUsagePolicy.resetText(until: window.resetsAt, now: Date()))
+            Text(ClaudeLimitRings.resetText(until: ring.resetsAt, now: Date()))
                 .font(.system(size: 9))
                 .foregroundColor(DS.HUD.text3)
                 .lineLimit(1)
@@ -181,6 +172,6 @@ private struct UsageRing: View {
         }
         .frame(width: 78)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(label) window \(SystemStatsFormatter.percent(window.fraction)) used")
+        .accessibilityLabel("\(ring.label) window \(SystemStatsFormatter.percent(ring.fraction)) used")
     }
 }

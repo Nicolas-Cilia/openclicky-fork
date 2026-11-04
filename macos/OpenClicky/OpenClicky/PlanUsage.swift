@@ -401,19 +401,15 @@ nonisolated enum PlanLimitText {
     }
 }
 
-/// Switches on a plan that is already signed in, once: a plan someone switched off stays off.
+/// Switches on Codex if it is already signed in, once: a plan someone switched off stays off.
+/// Claude is never switched on here: using a Claude plan with OpenClicky is at the person's own risk
+/// (README, Claude plan warning), so it waits for them to press Sign In or flip its switch.
 enum PlanAutoLink {
     static func run() async {
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
-        let settings = OpenClickyConfiguration.settings
-        let claudeReady = settings.useClaudeCodePlan == nil ? await PlanCLIs.claudeCodeStatus() == .ready : false
-        let codexReady = settings.useCodexPlan == nil ? await PlanCLIs.codexStatus() == .ready : false
-        guard claudeReady || codexReady else { return }
-        OpenClickyConfiguration.update { settings in
-            if claudeReady { settings.useClaudeCodePlan = true }
-            if codexReady { settings.useCodexPlan = true }
-        }
+        guard OpenClickyConfiguration.settings.useCodexPlan == nil, await PlanCLIs.codexStatus() == .ready else { return }
+        OpenClickyConfiguration.update { $0.useCodexPlan = true }
         ShellSettingsRevision.shared.noteChanged()
-        AppLog.append("plans: linked what is already signed in (claude \(claudeReady), codex \(codexReady))")
+        AppLog.append("plans: linked codex, already signed in")
     }
 }
