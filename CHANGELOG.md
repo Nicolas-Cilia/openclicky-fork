@@ -15,6 +15,16 @@ release page shows each platform under its own heading once that platform's file
 (`scripts/update-release-page.sh`, run by the Windows release workflow), followed by a
 downloads table. Under a platform heading, don't start bullets with "Windows:" again.
 
+## 0.12.0
+
+### All platforms
+
+- **Sign in to a plan from Settings.** Keys & Plans has a **Sign In** button for Claude and Codex. Your browser opens and the plan switches on once you've signed in, so there's no terminal to open. The Claude or Codex tool still has to be installed first.
+- **Claude stays off until you switch it on.** OpenClicky no longer turns on your Claude plan by itself when it finds Claude Code signed in. Codex still switches on by itself if it's already signed in.
+- **Using your Claude plan here is at your own risk.** Anthropic's terms limit using subscription logins with other apps, and it isn't clear whether OpenClicky's use is allowed. The README and Settings explain this, and an Anthropic API key avoids the risk.
+- **OpenClicky no longer reads Claude's login.** The Coding agents limit rings now use what Claude reports with each answer, so they only update when Clicky answers on your Claude plan.
+- **Gemini works with an API key.** **Get a Key** opens the page to make one.
+
 ## 0.11.3
 
 ### All platforms
