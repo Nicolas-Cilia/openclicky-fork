@@ -3,6 +3,28 @@ import Testing
 @testable import OpenClicky
 
 struct SpokenChunkerTests {
+    @Test func markdownIsNeverReadOut() {
+        #expect(SpokenChunker.withoutMarkdown("click **Format**, then *Shape*.") == "click Format, then Shape.")
+        #expect(SpokenChunker.withoutMarkdown("# Steps\n- open `Insert`\n* pick a shape") == "Steps\nopen Insert\npick a shape")
+        #expect(SpokenChunker.withoutMarkdown("see [the docs](https://example.com) here") == "see the docs here")
+        #expect(SpokenChunker.withoutMarkdown("__bold__ and ~~gone~~") == "bold and gone")
+    }
+
+    @Test func starsThatMeanSomethingStay() {
+        #expect(SpokenChunker.withoutMarkdown("2 * 3 is 6, and 4*5 is 20") == "2 * 3 is 6, and 4*5 is 20")
+        #expect(SpokenChunker.withoutMarkdown("use my_file.txt") == "use my_file.txt")
+        #expect(SpokenChunker.withoutMarkdown("**2** apples") == "2 apples")
+    }
+
+    @Test func aChunkedAnswerLeavesNoStarsAndKeepsItsPointTag() {
+        var chunker = SpokenChunker()
+        var pieces = chunker.feed(accumulated: "[POINT:10,20:format] click **Format** in the menu bar. then choose **Shape**")
+        pieces += chunker.finish()
+        #expect(chunker.pointTag == "[POINT:10,20:format]")
+        #expect(!pieces.joined().contains("*"))
+        #expect(pieces.joined(separator: " ").contains("click Format in the menu bar."))
+    }
+
     @Test func theFirstSentenceIsReadyAsSoonAsItEnds() {
         var chunker = SpokenChunker()
         #expect(chunker.feed(accumulated: "that number is your") == [])

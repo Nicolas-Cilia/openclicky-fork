@@ -31,11 +31,28 @@ describe("gate", () => {
     expect(parseGateReply('{"lane":"maybe"}')).toBeUndefined();
     expect(parseGateReply("nope")).toBeUndefined();
   });
-  it("heuristic errs toward the agent lane", () => {
-    expect(heuristicLane("what does this error mean: ENOENT")).toBe("ask");
-    expect(heuristicLane("create a file called hello.txt")).toBe("agent");
-    expect(heuristicLane("how do I fix my repo")).toBe("agent");
-    expect(heuristicLane("do the thing")).toBe("agent");
+  it("heuristic sends questions to the ask lane, even ones about doing work", () => {
+    for (const question of [
+      "what does this error mean: ENOENT",
+      "how do I fix my repo",
+      "how do I turn this shape into a circle",
+      "How can I make a folder?",
+      "can I add a border to this?",
+      "hey clicky, how do I remove the background",
+      "okay so where do I run this",
+      "turn this shape into a circle",
+      "do the thing",
+    ]) expect(heuristicLane(question), question).toBe("ask");
+  });
+  it("heuristic sends a request that opens with the work to an agent", () => {
+    for (const request of [
+      "create a file called hello.txt",
+      "fix my repo",
+      "Please write a report on this",
+      "can you make a folder on my desktop",
+      "hey clicky, could you draft an email to Sam",
+      "okay, go ahead and run the tests",
+    ]) expect(heuristicLane(request), request).toBe("agent");
   });
   it("calls /v1/messages on the own key and returns the model's lane", async () => {
     mode = "ok";

@@ -80,7 +80,7 @@ Behavior:
 - never loop on the same blocked integration command. If Composio auth is missing or expired, stop the integration route and point to OpenClicky Settings -> Integrations; do not attempt OAuth from inside the agent.
 - when a route is intentionally not shipped in this release, do not present it as an auth/key problem and do not suggest "retry" buttons for that route
 - keep commentary brief and milestone-based while work is happening
-- give a concise final answer that OpenClicky can summarize aloud naturally
+- give a concise final answer that OpenClicky can summarize aloud naturally: it is read out, so write plain sentences with no markdown, lists or headings
 - if blocked, say exactly what tool, permission, or capability is missing
 
 Local file access (avoid macOS permission-prompt storms):

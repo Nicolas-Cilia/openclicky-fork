@@ -102,7 +102,18 @@ public sealed class SpokenChunker
     // MARK: - Private
 
     /// <summary>The text without the guide's [NEXT] and without [UNSURE], trimmed.</summary>
-    private static string RemovingMarkers(string text) => UnsureMarker.RemovingMarkers(GuidedStepMarker.RemovingMarkers(text));
+    private static string RemovingMarkers(string text) => WithoutMarkdown(UnsureMarker.RemovingMarkers(GuidedStepMarker.RemovingMarkers(text)));
+
+    /// <summary>Models write markdown even when told not to, and a voice reads "asterisk asterisk" out. A lone * between numbers stays, as "2 * 3" means something; `_` stays, as snake_case does too.</summary>
+    public static string WithoutMarkdown(string text)
+    {
+        var spoken = System.Text.RegularExpressions.Regex.Replace(text, @"\[([^\]]+)\]\([^)]*\)", "$1");
+        spoken = System.Text.RegularExpressions.Regex.Replace(spoken, @"(?m)^[ \t]*(?:#{1,6}|[-*+•]|>)[ \t]+", "");
+        spoken = System.Text.RegularExpressions.Regex.Replace(spoken, @"\*\*|__|~~|`", "");
+        spoken = System.Text.RegularExpressions.Regex.Replace(spoken, @"(?<![0-9]\s?)\*|\*(?!\s?[0-9])", "");
+        spoken = System.Text.RegularExpressions.Regex.Replace(spoken, @"[ \t]{2,}", " ");
+        return spoken.Trim();
+    }
 
     private static readonly Regex CompleteLeadingTagPattern = new(@"^\s*\[POINT:[^\]]*\]", RegexOptions.CultureInvariant);
     private static readonly Regex TrailingTagPattern = new(@"\[POINT:[^\]]*\]\s*$", RegexOptions.CultureInvariant);
