@@ -117,7 +117,7 @@ public static class AskLanePrompts
 
     /// <summary>
     /// The ask lane offers the quick actions where nothing else does them: whenever the agent lane
-    /// doesn't run (a free account, or no openclicky tool on this PC), and to a plan, which the
+    /// doesn't run (no agent set up, or no openclicky tool on this PC), and to a plan, which the
     /// agent lane's gate never sees as the one answering.
     /// </summary>
     public static bool OffersQuickActionsToAskLane(bool agentLaneRuns, AnswerSource? answeringSource)

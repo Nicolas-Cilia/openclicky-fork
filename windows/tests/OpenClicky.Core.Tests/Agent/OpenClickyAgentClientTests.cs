@@ -245,7 +245,7 @@ public class OpenClickyAgentClientTests
     private static OpenClickyAgentClient MakeClient(ScriptedProcessRunner runner, IReadOnlyList<string>? cliCommand = null, string? model = null) =>
         new(runner,
             cliCommand: () => cliCommand ?? ["openclicky"],
-            cliEnvironment: () => new Dictionary<string, string> { ["PATH"] = @"C:\Windows", ["BACKEND_URL"] = "https://example.test" },
+            cliEnvironment: () => new Dictionary<string, string> { ["PATH"] = @"C:\Windows", ["OPENCLICKY_OPENAI_KEY"] = "sk-user" },
             workspacePath: () => Workspace,
             agentModelOverride: () => model);
 
@@ -262,7 +262,7 @@ public class OpenClickyAgentClientTests
         Assert.Equal(@"C:\Users\tester\AppData\Roaming\npm\openclicky.cmd", request.Command);
         Assert.Equal(["do", "what is this?", "--gate-only", "--events"], request.Arguments);
         Assert.Equal(Workspace, request.WorkingDirectory);
-        Assert.Equal("https://example.test", request.Environment!["BACKEND_URL"]);
+        Assert.Equal("sk-user", request.Environment!["OPENCLICKY_OPENAI_KEY"]);
     }
 
     [Fact]

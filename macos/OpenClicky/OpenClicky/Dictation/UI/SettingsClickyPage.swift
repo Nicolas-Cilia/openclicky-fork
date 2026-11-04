@@ -19,9 +19,14 @@ extension SettingsCatalog {
         [
             SettingsItem(
                 id: "clicky.answerSource",
-                title: "Answers come from", detail: "Automatic uses your own keys first, then plans you switched on, then the free credits.",
+                title: "Answers come from", detail: "Your default. Automatic uses a linked plan first, then your own keys.",
                 keywords: ["provider", "model", "openai", "anthropic", "claude", "openrouter", "gemini", "groq", "mistral", "grok", "codex", "subscription", "plan", "answers"],
                 view: AnyView(AnswerSourceRow())),
+            SettingsItem(
+                id: "clicky.backupSource",
+                title: "When it runs out", detail: "Which plan takes over when your default plan hits its limit.",
+                keywords: ["backup", "fallback", "failover", "limit", "credits", "ran out", "codex", "claude", "plan", "subscription"],
+                view: AnyView(BackupSourceRow())),
             SettingsItem(
                 id: "clicky.model",
                 title: "Claude model", detail: "When Claude answers: Sonnet is quicker, Opus thinks harder.",
@@ -30,8 +35,15 @@ extension SettingsCatalog {
             SettingsItem(
                 id: "clicky.onThisMac",
                 title: OnThisMacRow.title, detail: OnThisMacRow.detail,
-                keywords: ["apple intelligence", "on device", "local", "private", "offline", "this mac", "credits", "quick actions", "open app", "volume", "rewrite"],
+                keywords: ["apple intelligence", "on device", "local", "private", "offline", "this mac", "quick actions", "open app", "volume", "rewrite"],
                 view: AnyView(OnThisMacRow(settings: settings))),
+            SettingsItem(
+                id: "clicky.guidesWaitForContinue",
+                title: "Wait for me to say continue", detail: "In step-by-step help, hold ⌃⌥ and say “continue” to move on. Clicks don’t.",
+                keywords: ["guide", "steps", "step by step", "continue", "next", "click", "wait", "pace", "tutorial"],
+                view: AnyView(SettingsRow(title: "Wait for me to say continue", detail: "In step-by-step help, hold ⌃⌥ and say “continue” to move on. Clicks don’t.") {
+                    SettingsToggle(settings: settings, keyPath: \.guidesWaitForSpokenContinue)
+                })),
             SettingsItem(
                 id: "clicky.pointer",
                 title: "Show the pointer", detail: "It flies to what Clicky means.",
@@ -57,7 +69,7 @@ extension SettingsCatalog {
     /// The language Clicky speaks and listens in, who speaks the answers (Kokoro
     /// and the Mac voice with their own rows), and fast voice with hands-free.
     func voiceItems() -> [SettingsItem] {
-        let usesRealtime = AccountCapabilities.current().usesRealtime
+        let usesRealtime = ProviderCapabilities.current().usesRealtime
         var items: [SettingsItem] = [
             SettingsItem(
                 id: "clicky.language",
@@ -68,8 +80,8 @@ extension SettingsCatalog {
                 id: "clicky.speechVoice",
                 title: "Voice", detail: "Who speaks the answers: the cloud voice, or this Mac’s own voice, free and offline.",
                 keywords: ["voice", "speech", "tts", "text to speech", "elevenlabs", "eleven labs", "offline", "on device",
-                           "mac voice", "premium voice", "siri", "credits", "allowance", "left"],
-                view: AnyView(SpeechVoiceRows(openKeysPage: { [companionManager] in companionManager.showSettings(.account) }))),
+                           "mac voice", "premium voice", "siri"],
+                view: AnyView(SpeechVoiceRows(openKeysPage: { [companionManager] in companionManager.showSettings(.keys) }))),
         ]
         // Fast voice runs on OpenAI Realtime or Gemini Live, which need an own OpenAI or Gemini key;
         // without one its switch would do nothing, so the row shows the way to a key instead.
@@ -87,7 +99,7 @@ extension SettingsCatalog {
             ]
             // Only worth a choice when both can run here.
             let credentials = ProviderCredentials(settings: OpenClickyConfiguration.settings)
-            if credentials.geminiKey != nil, credentials.openAIKey != nil || credentials.accountToken != nil {
+            if credentials.geminiKey != nil, credentials.openAIKey != nil {
                 items.append(SettingsItem(
                     id: "clicky.realtimeProvider",
                     title: "Fast voice with", detail: "Who talks back in fast voice and hands-free.",
@@ -117,7 +129,7 @@ extension SettingsCatalog {
                 title: "Fast voice", detail: "Instant replies need your own OpenAI or Gemini key. Without one, Clicky answers in the standard voice.",
                 keywords: ["realtime", "voice", "fast", "hands-free", "always listening", "openai", "gemini", "key"],
                 view: AnyView(SettingsRow(title: "Fast voice", detail: "Instant replies need your own OpenAI or Gemini key. Without one, Clicky answers in the standard voice.") {
-                    Button("Add Key…") { companionManager.showSettings(.account) }
+                    Button("Add Key…") { companionManager.showSettings(.keys) }
                         .pointerCursor()
                 })))
         }
@@ -175,7 +187,7 @@ struct EmailAppRow: View {
     }
 }
 
-/// Who runs fast voice and hands-free when both an OpenAI and a Gemini key (or an account) are
+/// Who runs fast voice and hands-free when both an OpenAI and a Gemini key are
 /// here: automatic (OpenAI first), OpenAI Realtime or Gemini Live. `realtimeProvider` in shell.json.
 struct RealtimeProviderRow: View {
     let changed: () -> Void
@@ -328,7 +340,7 @@ struct OnThisMacRow: View {
 
     var body: some View {
         let unavailableReason = LocalAskModelAvailability.unavailableReason()
-        let goesToRealtime = OpenClickyConfiguration.isConfigured && AccountCapabilities.current().usesRealtime
+        let goesToRealtime = ProviderCapabilities.current().usesRealtime
         SettingsRow(title: Self.title, detail: Self.detailShown(unavailableReason: unavailableReason, goesToRealtime: goesToRealtime)) {
             SettingsToggle(settings: settings, keyPath: \.answerSimpleRequestsOnThisMac)
                 .disabled(unavailableReason != nil)
@@ -371,7 +383,6 @@ private struct AnswerSourceRow: View {
     private func nowAnswering(_ credentials: ProviderCredentials) -> String {
         switch ProviderRouter.route(for: .claude, credentials: credentials) {
         case .anthropicDirect: return AnswerSource.anthropic.displayName
-        case .backend: return AnswerSource.openClickyAccount.displayName
         case .answerProvider(let source): return source.displayName
         case .openAIDirect: return AnswerSource.openAI.displayName
         case .unavailable: return "nothing set up yet"
@@ -380,7 +391,7 @@ private struct AnswerSourceRow: View {
 }
 
 /// Who speaks the answers (`speechVoice` in shell.json, SpeechVoiceChoice): Automatic, every
-/// voice there is a key or an account for, Kokoro (picking it downloads it) and this Mac. The line
+/// voice there is a key for, Kokoro (picking it downloads it) and this Mac. The line
 /// under it names who speaks now and what it costs. Kokoro and the Mac voice each get their own rows
 /// under it; a group, so the form draws them as rows.
 private struct SpeechVoiceRows: View {
@@ -388,15 +399,13 @@ private struct SpeechVoiceRows: View {
     @ObservedObject private var dictationSettings = DictationSettings.shared
     @ObservedObject private var shellSettingsRevision = ShellSettingsRevision.shared
     @ObservedObject private var kokoro = KokoroVoice.shared
-    @StateObject private var billing = BillingStatusModel()
 
     var body: some View {
         let _ = shellSettingsRevision.revision
         let _ = kokoro.state
         let settings = OpenClickyConfiguration.settings
         let picked = SpeechVoiceChoice(stored: settings.speechVoice)
-        let offered = SpeechVoiceChoice.offered(settings: settings, hasAccount: OpenClickyConfiguration.hasAccountToken,
-                                                languageCode: ReplyLanguage.currentCode)
+        let offered = SpeechVoiceChoice.offered(settings: settings, languageCode: ReplyLanguage.currentCode)
         Group {
             SettingsRow(title: "Voice", detail: "Now: \(nowSpeakingSentence(picked: picked))") {
                 Picker("", selection: Binding(
@@ -414,7 +423,6 @@ private struct SpeechVoiceRows: View {
                 .labelsHidden().fixedSize()
                 .pointerCursor()
             }
-            .onAppear { billing.refresh() }
             // Also while the automatic download runs, so it can be watched or cancelled.
             if picked == .kokoro || kokoro.state.isBusy { KokoroRows() }
             if SpeechVoiceChoice.current() == .mac || picked == .mac { MacVoiceRow() }
@@ -433,7 +441,7 @@ private struct SpeechVoiceRows: View {
         let vendors = dictationSettings.region.offersIndianOptions
             ? "OpenAI, ElevenLabs, Gemini, Google Cloud, Amazon Polly or Sarvam"
             : "OpenAI, ElevenLabs, Gemini, Google Cloud or Amazon Polly"
-        return "Add an \(vendors) key under Keys & Account, and its voice shows up here."
+        return "Add an \(vendors) key under Keys & Plans, and its voice shows up here."
     }
 
     /// Who speaks now and what it costs, for the picked choice.
@@ -442,7 +450,7 @@ private struct SpeechVoiceRows: View {
         if picked != .automatic && picked != speaking {
             switch picked {
             case .kokoro: return "this Mac’s voice until Kokoro is downloaded."
-            default: return "this Mac’s voice: \(picked.title) needs its key under Keys & Account."
+            default: return "this Mac’s voice: \(picked.title) needs its key under Keys & Plans."
             }
         }
         switch speaking {
@@ -454,22 +462,9 @@ private struct SpeechVoiceRows: View {
         case .sarvam: return "Sarvam, on your own key."
         case .kokoro: return "Kokoro, on this Mac. Free, offline, nothing counted."
         case .mac, .automatic: return "this Mac’s voice. Free, offline, nothing counted."
-        case .account: return freeVoiceSentence
         }
     }
 
-    /// The free voice and what is left of its allowance.
-    private var freeVoiceSentence: String {
-        guard let summary = billing.summary, summary.isMetered, !summary.byok else { return "ElevenLabs, through OpenClicky." }
-        if summary.isSwitchedOff { return "ElevenLabs, on the free credits, which are used up for now. This Mac’s voice works meanwhile." }
-        // The voice has its own allowance in spoken characters, apart from the money one: it
-        // can run out while most of the money is left.
-        if summary.isUnconfirmed { return "ElevenLabs, on the starter voice allowance. Add your email under Account to keep it." }
-        guard summary.ttsCharsLimit > 0 else { return "ElevenLabs, on the free credits." }
-        let left = max(0, 100 - Int((Double(summary.ttsCharsMonth) / Double(summary.ttsCharsLimit) * 100).rounded()))
-        if left == 0 { return "ElevenLabs, on the free credits. This month’s voice allowance is used, so this Mac speaks until it comes back." }
-        return "ElevenLabs, on the free credits. \(left)% of this month’s voice allowance is left."
-    }
 }
 
 /// Kokoro's rows: the download (progress, cancel, retry), then which speaker, a preview, and

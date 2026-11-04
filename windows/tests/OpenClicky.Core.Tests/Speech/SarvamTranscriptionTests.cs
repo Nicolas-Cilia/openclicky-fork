@@ -113,6 +113,6 @@ public class SarvamTranscriptionTests
         var provider = new SarvamTranscriptionProvider(() => "auto", () => "  ", wire: () => new FakeSarvamWire());
         Assert.False(provider.IsConfigured);
         var error = await Assert.ThrowsAsync<SarvamSpeechException>(() => provider.StartStreamingSessionAsync([], _ => { }, _ => { }, _ => { }));
-        Assert.Equal("sarvam needs your key. paste it under settings → account.", error.Message);
+        Assert.Equal("sarvam needs your key. paste it under settings → keys & plans.", error.Message);
     }
 }

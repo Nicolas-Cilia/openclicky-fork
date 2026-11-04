@@ -82,7 +82,7 @@ struct SettingsCatalog {
             + clickyItems() + voiceItems()
             + islandAppearanceItems() + islandPluginItems() + calendarSettingsItems() + weatherSettingsItems()
             + clipboardSettingsItems() + notesSettingsItems() + timerSettingsItems()
-            + accountItems() + keysItems() + privacyItems() + generalItems() + aboutItems()
+            + keysItems() + privacyItems() + generalItems() + aboutItems()
             + navigationItems()
     }
 
@@ -263,7 +263,7 @@ struct SettingsTag: View {
     }
 }
 
-/// A note under a section ("Keys are sent to the OpenClicky backend…").
+/// A note under a section.
 struct SettingsFootnote: View {
     let text: String
     @Environment(\.settingsSearchQuery) private var searchQuery
@@ -280,7 +280,7 @@ func openExternalLink(_ address: String) {
 }
 
 /// Bumps whenever shell.json changes — from these pages or edited by hand — so rows that read
-/// it (the sarvam key, the provider badges, the account's backend and token) redraw.
+/// it (the sarvam key, the provider badges) redraw.
 @MainActor
 final class ShellSettingsRevision: ObservableObject {
     static let shared = ShellSettingsRevision()

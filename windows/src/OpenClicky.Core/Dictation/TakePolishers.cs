@@ -1,7 +1,6 @@
 // Ports Dictation/TakePolishers.swift: the models that tidy a take and make Hey Clicky edits.
-// Sarvam's chat on a Sarvam key, OpenAI on an own OpenAI key or the backend's chat route, Claude
-// Haiku on an own Anthropic key, any other answer key through its own vendor, and the backend's
-// /v1/polish for accounts. (The Mac's first rung, Apple's on-device model, has no Windows twin.)
+// Sarvam's chat on a Sarvam key, OpenAI on an own OpenAI key, Claude Haiku on an own Anthropic
+// key, and any other answer key through its own vendor. (The Mac's first rung, Apple's on-device model, has no Windows twin.)
 // `DictationEngineResolver.MakePolisher` picks one. Each says honestly who refused: an error
 // blamed on the wrong vendor sends people to the wrong key.
 
@@ -64,43 +63,15 @@ public sealed class SarvamTakePolisher(SarvamSpeechClient client) : ITakePolishe
         Client.CompleteAsync(system, user, cancellationToken: cancellationToken);
 }
 
-public enum BackendPolishErrorKind { InvalidBackendUrl, Refused, Unreadable }
-
 /// <summary>
-/// Why the backend's chat route did not polish a take. Its own type: these are OpenClicky's
-/// answers, and logging them as Sarvam's ("sarvam refused (401)") sent people to the wrong key.
+/// Polishes through OpenAI's chat completions, on the person's own OpenAI key.
 /// </summary>
-public sealed class BackendPolishException : Exception
-{
-    public BackendPolishErrorKind Kind { get; }
-    public int Status { get; }
-    public string Detail { get; }
-
-    private BackendPolishException(BackendPolishErrorKind kind, int status, string detail, string message) : base(message)
-    {
-        Kind = kind; Status = status; Detail = detail;
-    }
-
-    public static BackendPolishException InvalidBackendUrl() =>
-        new(BackendPolishErrorKind.InvalidBackendUrl, 0, "", "the openclicky backend address in settings isn't a valid url.");
-
-    public static BackendPolishException Refused(int status, string message) =>
-        new(BackendPolishErrorKind.Refused, status, message, $"openclicky refused the clean-up ({status}): {message}");
-
-    public static BackendPolishException Unreadable() =>
-        new(BackendPolishErrorKind.Unreadable, 0, "", "openclicky's clean-up answer had no text in it.");
-}
-
-/// <summary>
-/// Polishes through OpenAI's chat completions: straight to OpenAI on the person's own OpenAI key,
-/// else through the OpenClicky backend's OpenAI-shaped chat route.
-/// </summary>
-public sealed class BackendTakePolisher : ITakePolisher
+public sealed class OpenAITakePolisher : ITakePolisher
 {
     public const string Model = "gpt-4o-mini";
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(20);
 
-    public string DisplayName => "OpenClicky";
+    public string DisplayName => "OpenAI";
 
     public static JsonObject Body(string system, string user) => new()
     {
@@ -116,48 +87,16 @@ public sealed class BackendTakePolisher : ITakePolisher
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(RequestTimeout);
         var body = Body(system, user);
-        HttpResponseMessage response;
-        // Which side answered decides whose error a refusal is: OpenAI's own (the person's key) or
-        // OpenClicky's (the backend).
-        bool wentStraightToOpenAI;
-        var route = ProviderRouter.Current(ProviderCapability.OpenAIChat);
-        switch (route.Kind)
+        var openAIKey = ProviderRouter.CurrentCredentials().OpenAIKey
+            ?? throw TakePolishException.NotSetUp(ProviderRouter.NeedsOpenAIKeySentence);
+        using var response = await HttpClients.Shared.SendAsync(DirectProviderRequests.OpenAIChatCompletions(openAIKey, body), timeout.Token).ConfigureAwait(false);
+        var data = await response.Content.ReadAsByteArrayAsync(timeout.Token).ConfigureAwait(false);
+        var status = (int)response.StatusCode;
+        if (status is < 200 or >= 300)
         {
-            case ProviderRouteKind.OpenAIDirect:
-                // The person's own OpenAI key: the same chat completion, sent to OpenAI itself.
-                var openAIKey = ProviderRouter.CurrentCredentials().OpenAIKey
-                    ?? throw TakePolishException.NotSetUp(ProviderRouter.NeedsOpenAIKeySentence);
-                response = await HttpClients.Shared.SendAsync(DirectProviderRequests.OpenAIChatCompletions(openAIKey, body), timeout.Token).ConfigureAwait(false);
-                wentStraightToOpenAI = true;
-                break;
-            case ProviderRouteKind.Unavailable:
-                throw TakePolishException.NotSetUp(route.Sentence ?? ProviderRouter.NeedsOpenAIKeySentence);
-            default:
-                if (!Uri.TryCreate($"{OpenClickyConfiguration.BackendBaseUrl}/v1/chat/completions", UriKind.Absolute, out var url))
-                {
-                    throw BackendPolishException.InvalidBackendUrl();
-                }
-                var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = DirectProviderRequests.JsonContent(body) };
-                OpenClickyConfiguration.Authorize(request);
-                // A refused sign-in is refreshed once and sent again (BackendSignIn); what is left here is the backend's answer.
-                response = await BackendSignIn.SendAsync(request, sent => HttpClients.Shared.SendAsync(sent, timeout.Token)).ConfigureAwait(false);
-                wentStraightToOpenAI = false;
-                break;
+            throw TakePolishException.Refused("openai", status, Encoding.UTF8.GetString(data, 0, Math.Min(200, data.Length)));
         }
-        using (response)
-        {
-            var data = await response.Content.ReadAsByteArrayAsync(timeout.Token).ConfigureAwait(false);
-            var status = (int)response.StatusCode;
-            if (status is < 200 or >= 300)
-            {
-                var message = Encoding.UTF8.GetString(data, 0, Math.Min(200, data.Length));
-                if (wentStraightToOpenAI) throw TakePolishException.Refused("openai", status, message);
-                throw BackendPolishException.Refused(status, message);
-            }
-            if (ChatCompletionContent(data) is { } content) return content;
-            if (wentStraightToOpenAI) throw TakePolishException.EmptyAnswer("openai");
-            throw BackendPolishException.Unreadable();
-        }
+        return ChatCompletionContent(data) ?? throw TakePolishException.EmptyAnswer("openai");
     }
 
     /// <summary>`choices[0].message.content` of an OpenAI-shaped chat completion, null when absent.</summary>
@@ -176,92 +115,10 @@ public sealed class BackendTakePolisher : ITakePolisher
     }
 }
 
-// MARK: - Accounts
-
-/// <summary>
-/// Polish and Hey Clicky edits for signed-in accounts failed: a limit (typed, so the take still
-/// pastes with the local clean-up) or the backend unavailable. The message is a plain sentence for
-/// the orb and Hey Clicky edits, never "error 0".
-/// </summary>
-public sealed class AccountPolishException : Exception
-{
-    public AccountLimitError? Limit { get; }
-    /// <summary>The status the backend answered with when it was unavailable (0: no answer).</summary>
-    public int UnavailableStatus { get; }
-
-    private AccountPolishException(AccountLimitError? limit, int unavailableStatus, string message) : base(message)
-    {
-        Limit = limit;
-        UnavailableStatus = unavailableStatus;
-    }
-
-    public static AccountPolishException ForLimit(AccountLimitError limit)
-    {
-        var message = limit.Message();
-        return new(limit, 0, message.Length > 0 ? message : CouldNotReach);
-    }
-
-    public static AccountPolishException Unavailable(int status) =>
-        new(null, status, status == 503 ? AccountLimitErrors.ServiceTroubleMessage : CouldNotReach);
-
-    public const string CouldNotReach = "couldn't reach openclicky right now.";
-}
-
-/// <summary>
-/// Polish and Hey Clicky edits for signed-in accounts: the app says what to do and sends the
-/// words; the backend picks the model (a cheap one) and bills the grant.
-/// </summary>
-public sealed class AccountTakePolisher : ITakePolisher
-{
-    public string Purpose { get; init; } = "polish";
-    /// <summary>The transport; the shared client by default.</summary>
-    public Func<HttpRequestMessage, Task<HttpResponseMessage>> Send { get; init; } = request => HttpClients.Shared.SendAsync(request);
-    /// <summary>What a 401 does to the session (refresh once, sign out on the second); injectable for tests.</summary>
-    public BackendSignIn.SignInRejectionHandling SignIn { get; init; } = BackendSignIn.SignInRejectionHandling.Live;
-    /// <summary>
-    /// Puts the stored sign-in on the request; injectable so tests carry a token of their own
-    /// (a request sent without one gets its 401 back, never a refresh).
-    /// </summary>
-    public Action<HttpRequestMessage> Authorize { get; init; } = OpenClickyConfiguration.Authorize;
-    public string BackendBaseUrl { get; init; } = OpenClickyConfiguration.BackendBaseUrl;
-
-    public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(20);
-
-    public string DisplayName => "OpenClicky";
-
-    public async Task<string> PolishAsync(string system, string user, CancellationToken cancellationToken = default)
-    {
-        if (!Uri.TryCreate($"{BackendBaseUrl}/v1/polish", UriKind.Absolute, out var url)) throw AccountPolishException.Unavailable(0);
-        var request = new HttpRequestMessage(HttpMethod.Post, url)
-        {
-            Content = DirectProviderRequests.JsonContent(new JsonObject { ["purpose"] = Purpose, ["system"] = system, ["text"] = user }),
-        };
-        Authorize(request);
-        // A refused sign-in is refreshed once and sent again; a second refusal throws
-        // BackendSignInException(Expired), whose sentence is the sign-in one, not "couldn't reach".
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(RequestTimeout);
-        using var response = await BackendSignIn.SendAsync(request, Send, SignIn).WaitAsync(timeout.Token).ConfigureAwait(false);
-        var status = (int)response.StatusCode;
-        var data = await response.Content.ReadAsByteArrayAsync(timeout.Token).ConfigureAwait(false);
-        if (AccountLimitErrors.From(status, data) is { } limit) throw AccountPolishException.ForLimit(limit);
-        if (status is >= 200 and < 300)
-        {
-            try
-            {
-                if (JsonNode.Parse(data) is JsonObject json && json["text"] is JsonValue value && value.TryGetValue<string>(out var text)) return text;
-            }
-            catch (JsonException) { }
-        }
-        throw AccountPolishException.Unavailable(status);
-    }
-}
-
 // MARK: - Own keys
 
 /// <summary>
-/// Polish and edits on the person's own Anthropic key, straight to Anthropic: the request the
-/// backend's /v1/polish sends upstream (polish.ts), on Claude Haiku. No account involved.
+/// Polish and edits on the person's own Anthropic key, straight to Anthropic, on Claude Haiku.
 /// </summary>
 public sealed class AnthropicTakePolisher(string anthropicKey) : ITakePolisher
 {
@@ -403,12 +260,6 @@ public static class PolishFailureNotice
 
     public static string? Sentence(Exception error) => error switch
     {
-        // Signing out already said so, on the account page and in a caption.
-        BackendSignInException { Error: BackendSignInError.Expired } => null,
-        AccountPolishException { Limit: { } limit } => limit.Message().Length == 0 ? null : limit.Message(),
-        AccountPolishException { Limit: null, UnavailableStatus: 503 } => AccountLimitErrors.ServiceTroubleMessage,
-        // The backend relays a refusal of the person's own provider key with its status.
-        BackendPolishException { Kind: BackendPolishErrorKind.Refused, Status: 401 or 403 } => OwnKeyRefusedSentence,
         // A vendor reached directly is only ever reached on the person's own key.
         TakePolishException { Kind: TakePolishErrorKind.Refused, Status: 401 or 403 } => OwnKeyRefusedSentence,
         _ => null,
@@ -427,7 +278,7 @@ public static class PolishFailureNotice
     }
 
     /// <summary>Where a new sentence is shown: the companion's quiet caption. Replaceable (tests).</summary>
-    public static Action<string> ShowNotice { get; set; } = sentence => AccountProfileStore.Shared.ShowNotice?.Invoke(sentence);
+    public static Action<string> ShowNotice { get; set; } = sentence => OpenClickyConfiguration.ShowNotice?.Invoke(sentence);
 
     public static void Note(Exception error)
     {

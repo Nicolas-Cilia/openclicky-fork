@@ -105,7 +105,7 @@ private struct VoiceProviderOption: View {
     private var isSelected: Bool { settings.engine == choice }
 
     var body: some View {
-        // Read so the note redraws once a key or a sign-in lands in shell.json.
+        // Read so the note redraws once a key lands in shell.json.
         let _ = shellSettingsRevision.revision
         let unavailableReason = DictationEngineResolver.unavailableReason(for: choice)
         VStack(alignment: .leading, spacing: 6) {
@@ -144,7 +144,7 @@ private struct VoiceProviderOption: View {
                 HStack(spacing: 8) {
                     Text(unavailableReason).font(SettingsLook.caption).foregroundStyle(SettingsLook.danger)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button(choice == .sarvam ? "Add Key…" : "Sign In…") { companionManager.showSettings(.account) }
+                    Button("Add Key…") { companionManager.showSettings(.keys) }
                         .controlSize(.small)
                 }
                 .padding(.leading, 24)
@@ -397,7 +397,7 @@ struct DictationCleanUpRow: View {
     var body: some View {
         let _ = shellSettingsRevision.revision
         let hasModel = DictationEngineResolver.makePolisher() != nil
-        let needsModelNote = hasModel ? "" : " Needs an AI key (Settings → Keys & Account) or a free OpenClicky account."
+        let needsModelNote = hasModel ? "" : " Needs an AI key (Settings → Keys & Plans)."
         let tidiedOnThisMac = AppleModelTakePolisherAvailability.isAvailable(languageCode: settings.languageCode)
         let whereWordsAreTidied = tidiedOnThisMac ? "Apple Intelligence tidies your words on this Mac" : "Your words are sent online to be tidied"
         let cleanUpIsOn = Binding<Bool>(

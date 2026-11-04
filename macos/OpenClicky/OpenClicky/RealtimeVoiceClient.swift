@@ -5,8 +5,8 @@
 //  The fast voice lane (HeyClicky's RealtimeVoiceClient): speech in, speech out over one
 //  OpenAI Realtime WebSocket, no transcribe → think → synthesize chain.
 //
-//  - The backend mints a short-lived client secret (`POST /agent/realtime/session`); the real
-//    key never reaches the app.
+//  - The person's own OpenAI key mints a short-lived client secret at OpenAI; the socket uses
+//    that, not the key.
 //  - AVAudioEngine with Apple's voice-processing unit gives acoustic echo cancellation, so the
 //    mic can stay open while OpenClicky talks (full duplex, barge-in).
 //  - Push-to-talk: audio streams while the shortcut is held; on release a 400 ms tail is kept,
@@ -54,9 +54,9 @@ final class RealtimeVoiceClient: NSObject, ObservableObject {
     }
 
     /// Builds the OpenAI realtime websocket URL for a given model name. `model` arrives verbatim in
-    /// the backend's JSON session response, so a malformed or hostile value (a stray space, an
+    /// OpenAI's JSON session response, so a malformed or hostile value (a stray space, an
     /// unescaped character, …) must not force-unwrap into a crash: this falls back to the same
-    /// "gpt-realtime" default used elsewhere when the backend omits the field, and only returns nil
+    /// "gpt-realtime" default used elsewhere when OpenAI omits the field, and only returns nil
     /// in the (practically unreachable) case where even that literal fails to parse. Pulled out as a
     /// pure static function so it can be unit tested without opening a real connection.
     nonisolated static func realtimeSocketURL(forModel model: String) -> URL? {
@@ -182,7 +182,7 @@ final class RealtimeVoiceClient: NSObject, ObservableObject {
     private var connectedAt: Date?
     private var lastServerEventAt: Date?
     /// When the user last started a turn (voice or typed). The keep-warm loop reconnects in the
-    /// background only while this is recent: every session is minted by the backend and billed,
+    /// background only while this is recent: every session is minted and billed,
     /// and a Mac left running overnight must not buy one an hour for nobody.
     private var lastTurnStartedAt: Date?
     /// Resolved by the first server event on a new socket, or failed by the socket's first error.
@@ -386,7 +386,7 @@ final class RealtimeVoiceClient: NSObject, ObservableObject {
     /// as "bad server response", which reads as a network fault.
     nonisolated static func handshakeFailureDescription(statusCode: Int?, underlyingError: String, provider: String = "OpenAI") -> String {
         switch statusCode {
-        case 401: return "\(provider) refused the realtime session (401): the session key was rejected. Check your sign-in, or your own \(provider) key in Settings → Account."
+        case 401: return "\(provider) refused the realtime session (401): the session key was rejected. Check your own \(provider) key in Settings → Keys & Plans."
         case 403: return "\(provider) refused the realtime session (403): this key has no access to the realtime model."
         case 429: return "\(provider) refused the realtime session (429): this key is over its rate limit or out of credit."
         case let status? where status >= 400: return "\(provider) refused the realtime session (\(status))."
@@ -486,35 +486,24 @@ final class RealtimeVoiceClient: NSObject, ObservableObject {
         let secretResponse: URLResponse
         switch ProviderRouter.current(for: .realtime) {
         case .openAIDirect:
-            // The person's own OpenAI key mints the client secret at OpenAI itself; the answer
-            // has the same shape as the backend's.
+            // The person's own OpenAI key mints the client secret at OpenAI itself.
             guard let openAIKey = ProviderRouter.currentCredentials().openAIKey else { throw RealtimeVoiceError.notConfigured }
             let secretRequest = try DirectProviderRequests.openAIRealtimeSecret(key: openAIKey, instructions: connectInstructions, voice: voice)
             (secretData, secretResponse) = try await urlSession.data(for: secretRequest)
         case .unavailable(let sentence):
             throw ProviderRouteUnavailable(capability: .realtime, sentence: sentence)
-        case .backend, .anthropicDirect, .answerProvider:
-            // backendBaseURL is user-configurable (shell.json or an environment override), not a
-            // compile-time literal, so a malformed value must throw instead of crashing the app.
-            guard let secretRequestURL = URL(string: "\(OpenClickyConfiguration.backendBaseURL)/agent/realtime/session") else {
-                throw RealtimeVoiceError.invalidURL("OpenClicky backend URL is invalid: \(OpenClickyConfiguration.backendBaseURL)")
-            }
-            var secretRequest = URLRequest(url: secretRequestURL)
-            secretRequest.httpMethod = "POST"
-            secretRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            OpenClickyConfiguration.authorize(&secretRequest)
-            secretRequest.httpBody = try JSONSerialization.data(withJSONObject: ["voice": voice as Any, "instructions": connectInstructions].compactMapValues { $0 })
-            (secretData, secretResponse) = try await BackendSignIn.send(secretRequest) { [urlSession] in try await urlSession.data(for: $0) }
+        case .anthropicDirect, .answerProvider:
+            throw RealtimeVoiceError.notConfigured
         }
         let secretStatusCode = (secretResponse as? HTTPURLResponse)?.statusCode ?? 0
         guard (200...299).contains(secretStatusCode),
               let secretJSON = try JSONSerialization.jsonObject(with: secretData) as? [String: Any],
               let clientSecret = secretJSON["value"] as? String else {
-            throw RealtimeVoiceError.backend(Self.backendRefusalDescription(statusCode: secretStatusCode, body: secretData))
+            throw RealtimeVoiceError.refused(Self.refusalDescription(statusCode: secretStatusCode, body: secretData))
         }
         let model = (secretJSON["session"] as? [String: Any])?["model"] as? String ?? "gpt-realtime"
 
-        // `model` arrives verbatim in the backend's JSON response, so a malformed or hostile value
+        // `model` arrives verbatim in OpenAI's JSON response, so a malformed or hostile value
         // must not be allowed to force-unwrap into a crash.
         guard let socketRequestURL = Self.realtimeSocketURL(forModel: model) else {
             throw RealtimeVoiceError.invalidURL("OpenAI realtime URL is invalid for model \(model)")
@@ -625,7 +614,7 @@ final class RealtimeVoiceClient: NSObject, ObservableObject {
     private func awaitHandshake(on task: RealtimeSocket) async throws {
         if let refusal = handshakeFailureBeforeWaiting {
             handshakeFailureBeforeWaiting = nil
-            throw RealtimeVoiceError.backend(refusal)
+            throw RealtimeVoiceError.refused(refusal)
         }
         // The first event may already be in (it arrived during the audio warm-up). Not judged by
         // `lastServerEventAt`: waking from sleep sets that to `.distantPast`, mid-connect too.
@@ -635,14 +624,14 @@ final class RealtimeVoiceClient: NSObject, ObservableObject {
             Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
                 guard let self else { return }
-                self.failPendingHandshake(RealtimeVoiceError.backend("\(self.providerName) did not answer the realtime connection within 10 seconds."))
+                self.failPendingHandshake(RealtimeVoiceError.refused("\(self.providerName) did not answer the realtime connection within 10 seconds."))
             }
         }
     }
 
-    /// The backend's own error text where it gave one, with the status, so a rejected key reads
+    /// OpenAI's own error text where it gave one, with the status, so a rejected key reads
     /// as a rejected key rather than as JSON.
-    nonisolated static func backendRefusalDescription(statusCode: Int, body: Data) -> String {
+    nonisolated static func refusalDescription(statusCode: Int, body: Data) -> String {
         let bodyJSON = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
         let stated = (bodyJSON?["error"] as? String)
             ?? ((bodyJSON?["error"] as? [String: Any])?["message"] as? String)
@@ -650,11 +639,11 @@ final class RealtimeVoiceClient: NSObject, ObservableObject {
         let detail = stated.flatMap { $0.isEmpty ? nil : $0 } ?? "no client secret"
         switch statusCode {
         case 401, 403:
-            return "the backend refused (\(statusCode)): \(detail). Check your sign-in, or your own OpenAI key in ~/.openclicky/shell.json."
+            return "OpenAI refused (\(statusCode)): \(detail). Check your own OpenAI key in Settings → Keys & Plans."
         case 0:
             return detail
         default:
-            return "the backend answered \(statusCode): \(detail)"
+            return "OpenAI answered \(statusCode): \(detail)"
         }
     }
 
@@ -1086,7 +1075,7 @@ final class RealtimeVoiceClient: NSObject, ObservableObject {
             guard lastError != nil else { return }
             try await Task.sleep(nanoseconds: 200_000_000)
         }
-        throw RealtimeVoiceError.backend("\(providerName) did not accept the session setup (\(lastError?.localizedDescription ?? "no answer")).")
+        throw RealtimeVoiceError.refused("\(providerName) did not accept the session setup (\(lastError?.localizedDescription ?? "no answer")).")
     }
 
     private func sendWire(_ object: [String: Any], on webSocketTask: RealtimeSocket) throws {
@@ -1115,7 +1104,7 @@ final class RealtimeVoiceClient: NSObject, ObservableObject {
                         underlyingError: Self.closeDescription(task.closeReason) ?? error.localizedDescription,
                         provider: self.providerName)
                     if self.handshakeContinuation != nil {
-                        self.failPendingHandshake(RealtimeVoiceError.backend(reason))
+                        self.failPendingHandshake(RealtimeVoiceError.refused(reason))
                         return
                     }
                     if !self.isConnected {
@@ -1637,15 +1626,15 @@ final class RealtimeVoiceClient: NSObject, ObservableObject {
 enum RealtimeVoiceError: LocalizedError {
     case notConfigured
     case notConnected
-    case backend(String)
+    case refused(String)
     case audio(String)
     case invalidURL(String)
 
     var errorDescription: String? {
         switch self {
-        case .notConfigured: return "OpenClicky backend token is not configured."
+        case .notConfigured: return "Fast voice needs your own OpenAI or Gemini key."
         case .notConnected: return "Realtime session is not connected."
-        case .backend(let message): return "Realtime session could not be created: \(message)"
+        case .refused(let message): return "Realtime session could not be created: \(message)"
         case .audio(let message): return "Audio setup failed: \(message)"
         case .invalidURL(let message): return message
         }

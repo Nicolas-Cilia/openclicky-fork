@@ -1,11 +1,7 @@
-// Ports ProviderRoute.swift. Own keys are the primary route (issue #4). A capability the person
-// has a key for goes straight to that vendor with their key; the OpenClicky backend is only for a
-// capability they have no key for, on their account's token, and then without any own key: a key
-// never leaves this PC except to its own vendor. Every caller asks `ProviderRouter` the same
-// question, so there is one place that decides, and one log line per change of route.
-//
-// The direct requests are the ones the backend's bring-your-own-key path sends upstream
-// (backend/src/proxy.ts, keys.ts, skillsCreate.ts), so a request means the same thing either way.
+// Ports ProviderRoute.swift. A capability the person has a key for goes straight to that vendor with
+// their key; a question can also go to a Claude or Codex plan through its CLI. Every caller asks
+// `ProviderRouter` the same question, so there is one place that decides, and one log line per change
+// of route.
 
 using System.Net.Http.Headers;
 using System.Text;
@@ -23,14 +19,12 @@ public enum ProviderCapability
     Claude,
     /// <summary>OpenAI chat completions: the take clean-up on an own key. OpenAI key.</summary>
     OpenAIChat,
-    /// <summary>OpenAI speech on an own key, else the account's /tts. Kept because the route table is tested per key.</summary>
+    /// <summary>OpenAI speech on an own key. Kept because the route table is tested per key.</summary>
     Speech,
-    /// <summary>Upload speech-to-text (/agent/transcribe). OpenAI key.</summary>
+    /// <summary>Upload speech-to-text. OpenAI key.</summary>
     Transcription,
-    /// <summary>Realtime voice: the client secret (/agent/realtime/session). OpenAI key.</summary>
+    /// <summary>Realtime voice: the client secret. OpenAI key.</summary>
     Realtime,
-    /// <summary>AssemblyAI streaming (/transcribe-token): minted on OpenClicky's AssemblyAI key, account only.</summary>
-    AssemblyAIStreaming,
 }
 
 public enum ProviderRouteKind
@@ -39,9 +33,7 @@ public enum ProviderRouteKind
     AnthropicDirect,
     /// <summary>Questions answered by another source (an OpenAI-compatible key, Gemini, or a plan). Only for Claude.</summary>
     AnswerProvider,
-    /// <summary>The OpenClicky backend, on the account's token (no own keys sent).</summary>
-    Backend,
-    /// <summary>No key for this and no account: the sentence says what is missing.</summary>
+    /// <summary>Nothing set up for this: the sentence says what is missing.</summary>
     Unavailable,
 }
 
@@ -63,7 +55,6 @@ public sealed record ProviderRoute
 
     public static ProviderRoute OpenAIDirect { get; } = new(ProviderRouteKind.OpenAIDirect);
     public static ProviderRoute AnthropicDirect { get; } = new(ProviderRouteKind.AnthropicDirect);
-    public static ProviderRoute Backend { get; } = new(ProviderRouteKind.Backend);
     public static ProviderRoute AnswerProvider(AnswerSource source) => new(ProviderRouteKind.AnswerProvider, source: source);
     public static ProviderRoute Unavailable(string sentence) => new(ProviderRouteKind.Unavailable, sentence: sentence);
 
@@ -72,7 +63,6 @@ public sealed record ProviderRoute
         ProviderRouteKind.OpenAIDirect => "openai, own key",
         ProviderRouteKind.AnthropicDirect => "anthropic, own key",
         ProviderRouteKind.AnswerProvider => Source!.Value.DisplayName(),
-        ProviderRouteKind.Backend => "openclicky backend, account",
         _ => "unavailable",
     };
 
@@ -81,7 +71,6 @@ public sealed record ProviderRoute
     {
         ProviderRouteKind.AnthropicDirect => Providers.AnswerSource.Anthropic,
         ProviderRouteKind.AnswerProvider => Source,
-        ProviderRouteKind.Backend => Providers.AnswerSource.OpenClickyAccount,
         _ => null,
     };
 
@@ -95,12 +84,11 @@ public sealed record ProviderRoute
     };
 }
 
-/// <summary>The keys and token a route is decided on. Values only: no key ever goes into a log.</summary>
+/// <summary>The keys and plans a route is decided on. Values only: no key ever goes into a log.</summary>
 public sealed record ProviderCredentials
 {
     public string? OpenAIKey { get; init; }
     public string? AnthropicKey { get; init; }
-    public string? AccountToken { get; init; }
     /// <summary>The other keys that can answer questions, and the plans the person switched on.</summary>
     public string? OpenRouterKey { get; init; }
     public string? GeminiKey { get; init; }
@@ -111,16 +99,20 @@ public sealed record ProviderCredentials
     public bool CodexPlanOn { get; init; }
     /// <summary>Who should answer, when the person picked one (null: automatic).</summary>
     public AnswerSource? PreferredAnswerSource { get; init; }
+    /// <summary>Which plan takes over when the default runs out: null is the other linked plan, <see cref="NoBackup"/> none.</summary>
+    public string? BackupChoice { get; init; }
+    /// <summary>The plans that have run out for now (<see cref="PlanAvailability"/>).</summary>
+    public IReadOnlySet<AnswerSource> ExhaustedPlans { get; init; } = new HashSet<AnswerSource>();
+    public const string NoBackup = "none";
 
     /// <summary>Blank values count as missing; every value is trimmed.</summary>
-    public ProviderCredentials(string? openAIKey, string? anthropicKey, string? accountToken,
+    public ProviderCredentials(string? openAIKey, string? anthropicKey,
                                string? openRouterKey = null, string? geminiKey = null, string? groqKey = null,
                                string? mistralKey = null, string? xaiKey = null,
                                bool claudeCodePlanOn = false, bool codexPlanOn = false, AnswerSource? preferredAnswerSource = null)
     {
         OpenAIKey = OpenClickyConfiguration.Cleaned(openAIKey);
         AnthropicKey = OpenClickyConfiguration.Cleaned(anthropicKey);
-        AccountToken = OpenClickyConfiguration.Cleaned(accountToken);
         OpenRouterKey = OpenClickyConfiguration.Cleaned(openRouterKey);
         GeminiKey = OpenClickyConfiguration.Cleaned(geminiKey);
         GroqKey = OpenClickyConfiguration.Cleaned(groqKey);
@@ -132,16 +124,17 @@ public sealed record ProviderCredentials
     }
 
     public static ProviderCredentials FromSettings(OpenClickyShellSettings settings) =>
-        new(settings.OpenaiApiKey, settings.AnthropicApiKey, settings.Token,
+        new(settings.OpenaiApiKey, settings.AnthropicApiKey,
             openRouterKey: settings.OpenRouterApiKey, geminiKey: settings.GeminiApiKey, groqKey: settings.GroqApiKey,
             mistralKey: settings.MistralApiKey, xaiKey: settings.XaiApiKey,
             claudeCodePlanOn: settings.UseClaudeCodePlan == true, codexPlanOn: settings.UseCodexPlan == true,
-            preferredAnswerSource: AnswerSources.FromRawValue(settings.AnswerSource));
+            preferredAnswerSource: AnswerSources.FromRawValue(settings.AnswerSource)) { BackupChoice = settings.BackupAnswerSource };
 
-    /// <summary>The keys and token in shell.json now.</summary>
-    public static ProviderCredentials Current() => FromSettings(OpenClickyConfiguration.Settings);
+    /// <summary>The keys in shell.json now, and which plans have run out.</summary>
+    public static ProviderCredentials Current() =>
+        FromSettings(OpenClickyConfiguration.Settings) with { ExhaustedPlans = PlanAvailability.Shared.ExhaustedPlans() };
 
-    /// <summary>The key for an API source, null for the plans and the account.</summary>
+    /// <summary>The key for an API source, null for the plans.</summary>
     public string? Key(AnswerSource source) => source switch
     {
         AnswerSource.Anthropic => AnthropicKey,
@@ -154,69 +147,92 @@ public sealed record ProviderCredentials
         _ => null,
     };
 
-    /// <summary>Whether `source` can answer with what is set up: its key, its plan switched on, or an account.</summary>
+    /// <summary>Whether `source` can answer with what is set up: its key, or its plan switched on.</summary>
     public bool CanAnswer(AnswerSource source) => source switch
     {
         AnswerSource.ClaudeCodePlan => ClaudeCodePlanOn,
         AnswerSource.CodexPlan => CodexPlanOn,
-        AnswerSource.OpenClickyAccount => AccountToken is not null,
         _ => Key(source) is not null,
     };
 
     private static readonly AnswerSource[] AutomaticOrder =
     [
-        AnswerSource.Anthropic, AnswerSource.OpenRouter, AnswerSource.OpenAI, AnswerSource.Gemini, AnswerSource.Xai,
-        AnswerSource.Mistral, AnswerSource.Groq, AnswerSource.ClaudeCodePlan, AnswerSource.CodexPlan, AnswerSource.OpenClickyAccount,
+        AnswerSource.ClaudeCodePlan, AnswerSource.CodexPlan, AnswerSource.Anthropic, AnswerSource.OpenRouter, AnswerSource.OpenAI,
+        AnswerSource.Gemini, AnswerSource.Xai, AnswerSource.Mistral, AnswerSource.Groq,
     ];
 
+    private static readonly AnswerSource[] Plans = [AnswerSource.ClaudeCodePlan, AnswerSource.CodexPlan];
+
     /// <summary>
-    /// The sources that can answer, in the order "automatic" tries them: own keys (Anthropic first,
-    /// then OpenRouter, which reaches the most models), then the plans switched on, then the account.
+    /// The sources that can answer, in the order "automatic" tries them: the plans switched on, then
+    /// own keys (Anthropic first, then OpenRouter, which reaches the most models).
     /// </summary>
     public IReadOnlyList<AnswerSource> AnswerSourcesInOrder => AutomaticOrder.Where(CanAnswer).ToList();
+
+    /// <summary>Who answers when nothing has run out: the person's pick if it is set up, else the first in order.</summary>
+    public AnswerSource? PrimaryAnswerSource =>
+        PreferredAnswerSource is { } preferred && CanAnswer(preferred)
+            ? preferred
+            : AnswerSourcesInOrder.Count > 0 ? AnswerSourcesInOrder[0] : null;
+
+    /// <summary>
+    /// The plan that takes over from the primary. Only ever a plan: a key is not used without being
+    /// chosen, so a plan running out never turns into a bill.
+    /// </summary>
+    public AnswerSource? BackupSource
+    {
+        get
+        {
+            if (BackupChoice == NoBackup || PrimaryAnswerSource is not { } primary || !Plans.Contains(primary)) return null;
+            if (AnswerSources.FromRawValue(BackupChoice) is { } picked && Plans.Contains(picked) && picked != primary && CanAnswer(picked))
+            {
+                return picked;
+            }
+            foreach (var plan in Plans)
+            {
+                if (plan != primary && CanAnswer(plan)) return plan;
+            }
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Who answers now: the primary, or the backup while the primary has run out and the backup has
+    /// not. With both out, the primary, whose refusal says so.
+    /// </summary>
+    public AnswerSource? ActiveAnswerSource
+    {
+        get
+        {
+            if (PrimaryAnswerSource is not { } primary) return null;
+            if (!ExhaustedPlans.Contains(primary) || BackupSource is not { } backup || ExhaustedPlans.Contains(backup)) return primary;
+            return backup;
+        }
+    }
 }
 
 public static class ProviderRouter
 {
-    /// <summary>No key and no account: the free account is the way in for most people, so it comes first.</summary>
-    public const string NeedsOpenAIKeySentence = "i can do that once you add your email for a free account, in settings, account. your own openai key works too.";
-    public const string NeedsAnthropicKeySentence = "i can answer that once you add your email for a free account, in settings, account. a key from openai, anthropic, openrouter, gemini and others works too.";
-    public const string AssemblyAINeedsAccountSentence = "assemblyai runs on openclicky's own key, so it needs an openclicky account. pick openai or offline dictation instead.";
+    /// <summary>Nothing set up: connecting a plan is the way in for most people, so it comes first.</summary>
+    public const string NeedsOpenAIKeySentence = "that needs your own openai key. add it in settings, keys & plans.";
+    public const string NeedsAnthropicKeySentence = "i can answer that once you connect claude or codex, or add a key, in settings, keys & plans.";
 
-    /// <summary>
-    /// The route for `capability`: own key → that vendor; no key but an account → the backend;
-    /// neither → unavailable, saying which key would do.
-    /// </summary>
+    /// <summary>The route for `capability`: own key or plan → that vendor; nothing set up → unavailable, saying what would do.</summary>
     public static ProviderRoute Route(ProviderCapability capability, ProviderCredentials credentials)
     {
-        switch (capability)
+        if (capability == ProviderCapability.Claude)
         {
-            case ProviderCapability.Claude:
-                // The person's pick when it can answer, else the first that can in the automatic order.
-                AnswerSource? source = credentials.PreferredAnswerSource is { } preferred && credentials.CanAnswer(preferred)
-                    ? preferred
-                    : credentials.AnswerSourcesInOrder.Count > 0 ? credentials.AnswerSourcesInOrder[0] : null;
-                return source switch
-                {
-                    AnswerSource.Anthropic => ProviderRoute.AnthropicDirect,
-                    AnswerSource.OpenClickyAccount => ProviderRoute.Backend,
-                    { } other => ProviderRoute.AnswerProvider(other),
-                    null => ProviderRoute.Unavailable(NeedsAnthropicKeySentence),
-                };
-            case ProviderCapability.OpenAIChat or ProviderCapability.Speech or ProviderCapability.Transcription or ProviderCapability.Realtime:
-                if (credentials.OpenAIKey is not null) return ProviderRoute.OpenAIDirect;
-                break;
+            return credentials.ActiveAnswerSource switch
+            {
+                AnswerSource.Anthropic => ProviderRoute.AnthropicDirect,
+                { } other => ProviderRoute.AnswerProvider(other),
+                null => ProviderRoute.Unavailable(NeedsAnthropicKeySentence),
+            };
         }
-        if (credentials.AccountToken is not null) return ProviderRoute.Backend;
-        return capability switch
-        {
-            ProviderCapability.Claude => ProviderRoute.Unavailable(NeedsAnthropicKeySentence),
-            ProviderCapability.AssemblyAIStreaming => ProviderRoute.Unavailable(AssemblyAINeedsAccountSentence),
-            _ => ProviderRoute.Unavailable(NeedsOpenAIKeySentence),
-        };
+        return credentials.OpenAIKey is not null ? ProviderRoute.OpenAIDirect : ProviderRoute.Unavailable(NeedsOpenAIKeySentence);
     }
 
-    /// <summary>The keys and token in shell.json now.</summary>
+    /// <summary>The keys in shell.json now, and which plans have run out.</summary>
     public static ProviderCredentials CurrentCredentials() => ProviderCredentials.Current();
 
     /// <summary>The route for `capability` with the settings in shell.json now. Logged when it changes.</summary>
@@ -249,14 +265,14 @@ public sealed class ProviderRouteUnavailableException(ProviderCapability capabil
     public string Sentence { get; } = sentence;
 }
 
-/// <summary>The direct vendor requests, shaped as the backend's own-key path shapes them upstream.</summary>
+/// <summary>The direct vendor requests.</summary>
 public static class DirectProviderRequests
 {
     public const string OpenAIBaseUrl = "https://api.openai.com/v1";
     public const string AnthropicMessagesUrl = "https://api.anthropic.com/v1/messages";
     public const string AnthropicVersion = "2023-06-01";
 
-    /// <summary>The backend's BYOK defaults (keys.ts, proxy.ts, backend/.dev.vars.example).</summary>
+    /// <summary>The default models on an own key.</summary>
     public const string DefaultOpenAIModel = "gpt-5.5";
     public const string DefaultAnthropicModel = "claude-haiku-4-5-20251001";
     public const string RealtimeModel = "gpt-realtime";
@@ -284,7 +300,7 @@ public static class DirectProviderRequests
     }
 
     /// <summary>
-    /// Anthropic Messages; the body is the caller's (the same one /chat relays), as JSON content —
+    /// Anthropic Messages; the body is the caller's, as JSON content —
     /// pass it here or set `Content = DirectProviderRequests.JsonContent(...)` afterwards.
     /// </summary>
     public static HttpRequestMessage AnthropicMessages(string key, JsonNode? body = null)
@@ -296,11 +312,11 @@ public static class DirectProviderRequests
         return request;
     }
 
-    /// <summary>The polish model the backend picks (modelPolicy.ts) and its output ceiling (polish.ts).</summary>
+    /// <summary>The polish model and its output ceiling.</summary>
     public const string PolishModel = "claude-haiku-4-5";
     public const int PolishMaxOutputTokens = 4096;
 
-    /// <summary>Dictation polish or a Hey Clicky edit on Claude Haiku, as /v1/polish sends it upstream.</summary>
+    /// <summary>Dictation polish or a Hey Clicky edit on Claude Haiku.</summary>
     public static HttpRequestMessage AnthropicPolish(string key, string system, string text)
     {
         var body = new JsonObject
@@ -347,7 +363,7 @@ public static class DirectProviderRequests
         return request;
     }
 
-    /// <summary>OpenAI speech for `text`, mp3 (synthesizeSpeech in proxy.ts).</summary>
+    /// <summary>OpenAI speech for `text`, mp3.</summary>
     public static HttpRequestMessage OpenAISpeech(string key, string text)
     {
         var request = OpenAIRequest("/audio/speech", key);
@@ -362,7 +378,7 @@ public static class DirectProviderRequests
         return request;
     }
 
-    /// <summary>The multipart upload the backend builds for /agent/transcribe (transcribeAudio in proxy.ts).</summary>
+    /// <summary>The multipart upload OpenAI's transcription takes.</summary>
     public static HttpRequestMessage OpenAITranscription(string key, byte[] wav, string? language, string? prompt, string? boundary = null)
     {
         boundary ??= $"openclicky-{Guid.NewGuid().ToString().ToUpperInvariant()}";
@@ -389,7 +405,7 @@ public static class DirectProviderRequests
         return request;
     }
 
-    /// <summary>A Realtime client secret (createRealtimeSession in proxy.ts); the answer has the backend's shape.</summary>
+    /// <summary>A Realtime client secret.</summary>
     public static HttpRequestMessage OpenAIRealtimeSecret(string key, string? instructions, string? voice, int expiresInSeconds = 600)
     {
         var request = OpenAIRequest("/realtime/client_secrets", key);

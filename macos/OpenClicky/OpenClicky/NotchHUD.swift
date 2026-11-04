@@ -152,7 +152,7 @@ final class NotchHUDModel: ObservableObject {
     var tourWidth: CGFloat { placement.isSideDrawer ? 360 : 512 }
     var tourHeight: CGFloat {
         // A side drawer is narrower, so the copy wraps onto more lines.
-        let statusRoom: CGFloat = (tourCard?.status == nil ? 0 : 38) + (tourCard?.microphoneName == nil ? 0 : 20) + (tourCard?.field == nil ? 0 : 38)
+        let statusRoom: CGFloat = (tourCard?.status == nil ? 0 : 38) + (tourCard?.microphoneName == nil ? 0 : 20)
         return cardTopInset + (placement.isSideDrawer ? 168 : 116) + statusRoom
     }
 
@@ -176,14 +176,14 @@ final class NotchHUDModel: ObservableObject {
     let sideHandleLength: CGFloat = 64
     var collapsedWidth: CGFloat {
         switch placement {
-        case .notch: return geometry.notchWidth
+        case .automatic, .notch: return geometry.notchWidth
         case .left, .right: return handleStripHeight
         case .hidden: return 0
         }
     }
     var collapsedHeight: CGFloat {
         switch placement {
-        case .notch: return geometry.hasHardwareNotch ? geometry.notchHeight + collapsedLipHeight : handleStripHeight
+        case .automatic, .notch: return geometry.hasHardwareNotch ? geometry.notchHeight + collapsedLipHeight : handleStripHeight
         case .left, .right: return sideHandleLength
         case .hidden: return 0
         }
@@ -305,11 +305,11 @@ final class NotchHUDModel: ObservableObject {
     /// The capsule shows in the band only when there is something to flip to.
     var showsCapsule: Bool { capsuleIDs.count > 1 }
 
-    /// The active component's height: 45 pt for the shortcuts row under a notch, 92 in a side
-    /// drawer (the (i) stacks over the shortcut grid), else what the component asks for.
+    /// The active component's height: 45 pt for the shortcuts row under a notch, taller in a side
+    /// drawer (the (i) stacks over one column of shortcuts), else what the component asks for.
     var slotHeight: CGFloat {
         let component = registry.first { $0.id == selection.active } ?? registry[0]
-        if placement.isSideDrawer && (component.id == IslandComponentRegistry.shortcutsID || component.id == IslandComponentRegistry.homeID) { return 92 }
+        if placement.isSideDrawer && (component.id == IslandComponentRegistry.shortcutsID || component.id == IslandComponentRegistry.homeID) { return NotchPanelBody.drawerHeight }
         return component.preferredHeight
     }
 
@@ -354,7 +354,7 @@ final class NotchHUDModel: ObservableObject {
     /// panel would run past the bottom of the screen).
     func islandFrame(width: CGFloat, height: CGFloat) -> CGRect {
         switch placement {
-        case .notch, .hidden:
+        case .automatic, .notch, .hidden:
             return CGRect(x: geometry.notchRect.midX - width / 2, y: geometry.screenFrame.maxY - height, width: width, height: height)
         case .left, .right:
             let area = geometry.visibleFrame.isEmpty ? geometry.screenFrame : geometry.visibleFrame
@@ -379,7 +379,7 @@ final class NotchHUDModel: ObservableObject {
         let island = islandFrame
         let margin = windowMargin
         switch placement {
-        case .notch, .hidden:
+        case .automatic, .notch, .hidden:
             return CGRect(x: island.minX - margin, y: island.minY - margin, width: island.width + margin * 2, height: island.height + margin)
         case .left:
             return CGRect(x: island.minX, y: island.minY - margin, width: island.width + margin, height: island.height + margin * 2)
@@ -612,7 +612,7 @@ final class NotchHUDModel: ObservableObject {
             isSettlingGracefully = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in self?.isSettlingGracefully = false }
         }
-        let sizeChanged = tourCard?.status != card?.status || tourCard?.step != card?.step || tourCard?.microphoneName != card?.microphoneName || tourCard?.field != card?.field
+        let sizeChanged = tourCard?.status != card?.status || tourCard?.step != card?.step || tourCard?.microphoneName != card?.microphoneName
         tourCard = card
         reconcile(immediately: true)
         if sizeChanged && expansion == .tour { onLayoutChanged?() }
@@ -777,7 +777,7 @@ final class NotchHUDManager {
     private var hoverPollTimer: Timer?
     private var busyCancellables = Set<AnyCancellable>()
     /// Where the islands live (Settings → general → "where openclicky lives").
-    private(set) var placement = HUDPlacement.stored
+    private(set) var placement = HUDPlacement.stored.resolved(notchIsOccupied: false)
 
     /// The screen the primary HUD lives on: the one with a hardware notch, else the menu-bar screen.
     /// (`NSScreen.main` follows keyboard focus and can be an external display.)
@@ -868,20 +868,6 @@ final class NotchHUDManager {
         let contentTop = island.maxY - instance.model.cardTopInset - 12
         let location = CGPoint(x: island.maxX - DS.HUD.bodySidePadding - 43, y: contentTop - 13)
         return (location, instance.model.geometry.screenFrame)
-    }
-
-    /// Gives the keyboard to the tour card's field (the account step's email or code). Like the
-    /// composer, the app activates and the field is made first responder until it takes.
-    func focusTourField() {
-        guard let instance = primaryInstance, instance.model.expansion == .tour else { return }
-        NSApp.activate(ignoringOtherApps: true)
-        instance.window.makeKeyAndOrderFront(nil)
-        for delay in [0.05, 0.25, 0.6] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak instance] in
-                guard let self, let instance, instance.model.expansion == .tour else { return }
-                self.focusComposerField(in: instance.window)
-            }
-        }
     }
 
     /// Closes every open panel because a window it opened is coming forward.
@@ -981,9 +967,6 @@ final class NotchHUDManager {
     func show(companionManager: CompanionManager) {
         self.companionManager = companionManager
         isShown = true
-        // The HUD is the app's home and is shown exactly once at launch: a good moment to start
-        // keeping a signed-in session fresh (refresh before the access token expires).
-        OpenClickyAuthSession.shared.start()
         if screenChangeObserver == nil {
             observeScreenChanges()
             observeBusyState(of: companionManager)
@@ -1300,6 +1283,8 @@ final class NotchHUDManager {
                 }
             }
         }
+        // Lets macOS bundle this wake-up with others.
+        hoverPollTimer?.tolerance = 0.02
     }
 
     private func resizeWindow(_ instance: Instance) {
@@ -1411,7 +1396,7 @@ struct NotchHUDView: View {
     /// screen edge a side drawer hangs from (the window's margin is on the other three sides).
     private var islandAlignment: Alignment {
         switch model.placement {
-        case .notch, .hidden: return .top
+        case .automatic, .notch, .hidden: return .top
         case .left: return .topLeading
         case .right: return .topTrailing
         }

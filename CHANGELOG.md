@@ -9,11 +9,28 @@ Write for the person who sees the update prompt: what they can now do, in plain 
 per change with the gist in bold. Links, `code` and *italics* are fine; keep it to bullets and
 short paragraphs.
 
-Split a section by platform with `### All platforms`, `### Mac`, `### Windows` and `### Linux`
+Split a section by platform with `### All platforms`, `### Mac` and `### Windows`
 (leave out the ones with nothing new). The Mac update dialog shows All platforms and Mac; the GitHub
 release page shows each platform under its own heading once that platform's files are attached
-(`scripts/update-release-page.sh`, run by the Windows and Linux release workflows), followed by a
+(`scripts/update-release-page.sh`, run by the Windows release workflow), followed by a
 downloads table. Under a platform heading, don't start bullets with "Windows:" again.
+
+## 0.11.0
+
+### All platforms
+
+- **Runs on your own plans.** Answers and agent tasks use your Claude and Codex subscriptions. Accounts, trials and the hosted service are gone, and API keys still work if you add one.
+- **A default and a backup.** Pick which plan answers, and which takes over when it hits its limit. It switches back after the reset. A key is never used as a backup.
+- **See your usage.** Keys & Plans shows what OpenClicky sent to each plan and how full each plan's limits are, with OpenClicky's rough share in orange on each bar.
+- **Updates come from this fork.**
+- **Agent tasks work without any setup beyond signing in to Codex.** The tool they use now comes with the app. If your computer has no Node.js, the app downloads it once when you have agent tasks set up.
+- **A more natural voice on offer.** The first-run tour offers Kokoro, a free voice that runs on your computer. It only downloads if you say yes.
+- **Keeps less on your computer.** Agent tasks and the screenshots saved with them are deleted after 14 days. Choose 7, 30 or 90 days, or Forever, in Settings → Privacy. Failed dictation audio now stops at 200 MB, and deleting a take deletes its audio.
+
+### Mac
+
+- **Much lighter when idle.** OpenClicky no longer animates hidden indicators in the background, so it uses far less CPU and memory while you aren't talking to it.
+- **Shares the notch.** The new Automatic placement moves the island to the right edge while another app, such as Vorssaint, is using the notch.
 
 ## 0.10.2
 

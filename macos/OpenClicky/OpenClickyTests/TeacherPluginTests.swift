@@ -291,14 +291,13 @@ struct TeacherPluginTests {
         #expect(((parts?[1]["image_url"] as? [String: Any])?["url"] as? String)?.hasPrefix("data:image/jpeg;base64,") == true)
     }
 
-    func credentials(openAI: String? = nil, anthropic: String? = nil, account: String? = nil, gemini: String? = nil, claudeCodePlan: Bool = false) -> ProviderCredentials {
-        ProviderCredentials(openAIKey: openAI, anthropicKey: anthropic, accountToken: account, geminiKey: gemini, claudeCodePlanOn: claudeCodePlan)
+    func credentials(openAI: String? = nil, anthropic: String? = nil, gemini: String? = nil, claudeCodePlan: Bool = false) -> ProviderCredentials {
+        ProviderCredentials(openAIKey: openAI, anthropicKey: anthropic, geminiKey: gemini, claudeCodePlanOn: claudeCodePlan)
     }
 
     @Test func lessonsAreWrittenWithoutOpenAITooButNeverOnAPlanAlone() {
-        #expect(TeacherSketchWriter.route(for: credentials(openAI: "sk-o", anthropic: "sk-a", account: "t")) == .openAI(key: "sk-o"))
-        #expect(TeacherSketchWriter.route(for: credentials(anthropic: "sk-a", account: "t")) == .anthropic(key: "sk-a"))
-        #expect(TeacherSketchWriter.route(for: credentials(account: "t", claudeCodePlan: true)) == .account)
+        #expect(TeacherSketchWriter.route(for: credentials(openAI: "sk-o", anthropic: "sk-a")) == .openAI(key: "sk-o"))
+        #expect(TeacherSketchWriter.route(for: credentials(anthropic: "sk-a")) == .anthropic(key: "sk-a"))
         #expect(TeacherSketchWriter.route(for: credentials(gemini: "g")) == .answerSource(.gemini))
         #expect(TeacherSketchWriter.route(for: credentials(claudeCodePlan: true)) == nil)
         #expect(TeacherSketchWriter.route(for: credentials()) == nil)

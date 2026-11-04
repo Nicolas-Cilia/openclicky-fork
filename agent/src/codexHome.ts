@@ -2,11 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import type { AgentConfig } from "./config.js";
 import { activeDir, syncActiveDir } from "./skillsLibrary.js";
-import { OPENAI_DIRECT_BASE } from "./providerRoute.js";
 
 export interface RenderVars {
   root: string;
-  backendUrl: string;
+  /** OpenAI API base for the own-key route. */
+  openaiBaseUrl?: string;
   workspace: string;
   model?: string;
   composioMcpUrl?: string;
@@ -16,10 +16,7 @@ export interface RenderVars {
   userSkillsActive: string;
   /** Directories outside the workspace Codex's sandbox may write to; empty renders no section. */
   writableRoots?: string[];
-  /**
-   * The person's own OpenAI key is set (OPENCLICKY_OPENAI_KEY): Codex calls OpenAI directly with it
-   * instead of the OpenClicky backend. The key itself is never written into config.toml.
-   */
+  /** The person's own OpenAI key is set (OPENCLICKY_OPENAI_KEY); it is never written into config.toml. */
   ownOpenAIKey?: boolean;
 }
 
@@ -85,10 +82,49 @@ export function renderSandboxWritableRoots(roots: string[] | undefined): string 
   return ["[sandbox_workspace_write]", `writable_roots = [${roots.map(tomlString).join(", ")}]`].join("\n");
 }
 
-/** Own OpenAI key: straight to OpenAI on it. Otherwise the backend on the account's session token. */
-export function renderProviderRoute(v: Pick<RenderVars, "backendUrl" | "ownOpenAIKey">): string {
-  if (v.ownOpenAIKey) return [`base_url = ${tomlString(OPENAI_DIRECT_BASE)}`, 'env_key = "OPENCLICKY_OPENAI_KEY"'].join("\n");
-  return [`base_url = ${tomlString(v.backendUrl.replace(/\/+$/, "") + "/v1")}`, 'env_key = "OPENCLICKY_SESSION_TOKEN"'].join("\n");
+/** Own OpenAI key: a custom provider on that key. Otherwise Codex's built-in provider, on the ChatGPT sign-in. */
+export function renderProviderLine(v: Pick<RenderVars, "ownOpenAIKey">): string {
+  return `model_provider = ${tomlString(v.ownOpenAIKey ? "openclicky" : "openai")}`;
+}
+
+export function renderProviderBlock(v: Pick<RenderVars, "openaiBaseUrl" | "ownOpenAIKey">): string {
+  if (!v.ownOpenAIKey) return "";
+  return [
+    "[model_providers.openclicky]",
+    'name = "OpenClicky"',
+    `base_url = ${tomlString((v.openaiBaseUrl ?? "https://api.openai.com/v1").replace(/\/+$/, ""))}`,
+    'env_key = "OPENCLICKY_OPENAI_KEY"',
+    // Codex rejects `wire_api = "chat"`; both routes speak the Responses API (/v1/responses).
+    'wire_api = "responses"',
+    "requires_openai_auth = false",
+    "supports_websockets = false",
+  ].join("\n");
+}
+
+/**
+ * Point the isolated CODEX_HOME at the person's ChatGPT sign-in. A link rather than a copy: the
+ * refresh token rotates, so two copies would sign each other out. Where Codex has replaced the link
+ * with a file during a refresh (or links are not allowed, as on Windows without developer mode), the
+ * newer file wins, so the freshest token always reaches both places.
+ */
+export function linkCodexLogin(codexHome: string, source: string): void {
+  const target = path.join(codexHome, "auth.json");
+  const stat = fs.lstatSync(target, { throwIfNoEntry: false });
+  const sourceStat = fs.statSync(source, { throwIfNoEntry: false });
+  if (stat?.isSymbolicLink() && sourceStat && path.resolve(codexHome, fs.readlinkSync(target)) === path.resolve(source)) return;
+  if (stat?.isFile() && (!sourceStat || stat.mtimeMs > sourceStat.mtimeMs)) {
+    fs.mkdirSync(path.dirname(source), { recursive: true });
+    fs.copyFileSync(target, source);
+    fs.chmodSync(source, 0o600);
+  }
+  if (stat) fs.rmSync(target);
+  if (!fs.existsSync(source)) return;
+  try {
+    fs.symlinkSync(source, target);
+  } catch {
+    fs.copyFileSync(source, target);
+    fs.chmodSync(target, 0o600);
+  }
 }
 
 /** Fill the placeholders in config/codex-config.toml. */
@@ -96,9 +132,9 @@ export function renderCodexConfig(template: string, v: RenderVars): string {
   const modelLine = v.model ? `model = ${tomlString(v.model)}` : "";
   return template
     .replaceAll("{{MODEL_LINE}}", modelLine)
-    .replaceAll("{{PROVIDER_ROUTE}}", renderProviderRoute(v))
+    .replaceAll("{{MODEL_PROVIDER_LINE}}", renderProviderLine(v))
+    .replaceAll("{{MODEL_PROVIDER_BLOCK}}", renderProviderBlock(v))
     .replaceAll("{{OPENCLICKY_ROOT}}", tomlStringInner(v.root))
-    .replaceAll("{{BACKEND_URL}}", v.backendUrl.replace(/\/+$/, ""))
     .replaceAll("{{WORKSPACE}}", tomlStringInner(v.workspace))
     .replaceAll("{{USER_SKILLS_ACTIVE}}", tomlStringInner(v.userSkillsActive))
     .replaceAll("{{MCP_SERVERS}}", renderMcpServers(v))
@@ -107,14 +143,21 @@ export function renderCodexConfig(template: string, v: RenderVars): string {
 
 /**
  * Materialize the isolated CODEX_HOME: create the directory and (re)write config.toml from the
- * template so the backend URL, skills paths, MCP servers, and trusted workspace are always current.
+ * template so the provider, skills paths, MCP servers, and trusted workspace are always current.
  * Also syncs the user's `active/` skills dir so Codex sees exactly the activated skills.
  */
+/** Why an agent run cannot start, in a sentence; nil when it can. */
+export function codexCredentialsProblem(cfg: Pick<AgentConfig, "openaiApiKey" | "codexAuthFile">): string | undefined {
+  if (cfg.openaiApiKey || fs.existsSync(cfg.codexAuthFile)) return undefined;
+  return "Codex is not signed in: run `codex login` and sign in with ChatGPT, or set your own OpenAI key (OPENCLICKY_OPENAI_KEY)";
+}
+
 export function ensureCodexHome(cfg: AgentConfig): { configPath: string } {
   const templatePath = path.join(cfg.root, "config", "codex-config.toml");
   const template = fs.readFileSync(templatePath, "utf8");
   fs.mkdirSync(cfg.codexHome, { recursive: true });
   const configPath = path.join(cfg.codexHome, "config.toml");
+  if (!cfg.openaiApiKey) linkCodexLogin(cfg.codexHome, cfg.codexAuthFile);
   // A broken user skills dir must not stop the agent: warn and run with whatever active/ holds.
   try {
     syncActiveDir(cfg.userSkillsDir);
@@ -125,7 +168,7 @@ export function ensureCodexHome(cfg: AgentConfig): { configPath: string } {
     configPath,
     renderCodexConfig(template, {
       root: cfg.root,
-      backendUrl: cfg.backendUrl,
+      openaiBaseUrl: cfg.openaiBaseUrl,
       workspace: cfg.workspace,
       model: cfg.model,
       composioMcpUrl: cfg.composioMcpUrl,

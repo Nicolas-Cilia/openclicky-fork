@@ -162,7 +162,6 @@ struct PlanToolProtocolTests {
 
     @MainActor
     @Test func theAskLaneOffersQuickActionsWhenTheAgentLaneCantOrAPlanAnswers() {
-        #expect(CompanionManager.offersQuickActionsToAskLane(agentLaneRuns: false, answeringSource: .openClickyAccount))
         #expect(CompanionManager.offersQuickActionsToAskLane(agentLaneRuns: false, answeringSource: .openAI))
         #expect(CompanionManager.offersQuickActionsToAskLane(agentLaneRuns: true, answeringSource: .claudeCodePlan))
         #expect(CompanionManager.offersQuickActionsToAskLane(agentLaneRuns: true, answeringSource: .codexPlan))

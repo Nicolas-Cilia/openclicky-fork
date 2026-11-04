@@ -29,7 +29,7 @@ permissions:
 jobs:
   windows:
     # Forks publish their own builds by hand; only the canonical repo uploads here.
-    if: github.repository == 'prasanthsasikumar/openclicky'
+    if: github.repository == 'Nicolas-Cilia/openclicky-fork'
     runs-on: windows-latest
     strategy:
       # Both architectures upload into the same GitHub release with --merge; one at a time.
@@ -75,6 +75,18 @@ jobs:
           dotnet publish windows/src/OpenClicky.Windows/OpenClicky.Windows.csproj -c Release
           -r ${{ matrix.runtime }} --self-contained true -p:Version=${{ steps.version.outputs.value }}
           -o ${{ env.PUBLISH_DIR }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Embed the agent tool
+        shell: pwsh
+        run: |
+          npm ci
+          npm run build -w agent
+          ./windows/scripts/embed-agent-tool.ps1 -Destination '${{ env.PUBLISH_DIR }}'
 
       # SignPath signs only OpenClicky's own binaries (artifact configuration "app"), returning the
       # whole folder with those files replaced.
@@ -152,6 +164,21 @@ jobs:
             --token '${{ secrets.GITHUB_TOKEN }}' --channel ${{ matrix.channel }} -o '${{ env.RELEASE_DIR }}' `
             --merge --releaseName 'OpenClicky ${{ steps.version.outputs.value }}' `
             --tag 'v${{ steps.version.outputs.value }}' --publish
+
+      # A name that never changes, so .../releases/latest/download/OpenClicky-Setup.exe is always the
+      # newest build (the README's download button). x64 is the plain name; ARM64 says so.
+      - name: Upload the always-latest installer
+        if: env.PUBLISH == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $setup = Get-ChildItem '${{ env.RELEASE_DIR }}' -Filter '*-Setup.exe' | Select-Object -First 1
+          if (-not $setup) { throw 'no Setup.exe to upload' }
+          $name = if ('${{ matrix.runtime }}' -eq 'win-arm64') { 'OpenClicky-Setup-arm64.exe' } else { 'OpenClicky-Setup.exe' }
+          $latest = Join-Path '${{ env.RELEASE_DIR }}' $name
+          Copy-Item $setup.FullName $latest
+          gh release upload 'v${{ steps.version.outputs.value }}' $latest --repo '${{ github.repository }}' --clobber
 
       - name: Keep the release files with the run
         if: env.PUBLISH != 'true'

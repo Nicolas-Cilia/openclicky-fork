@@ -1,4 +1,4 @@
-// New on Windows: the one websocket shape the speech sockets (AssemblyAI, Sarvam, OpenAI Realtime)
+// New on Windows: the one websocket shape the speech sockets (Sarvam, OpenAI Realtime)
 // use, standing in for URLSessionWebSocketTask so a test can drive a session with a fake socket.
 // The real one is ClientWebSocket. URLSession's lesson about one shared session per host has no
 // direct twin here: each ClientWebSocket owns its connection, and nothing is pooled to corrupt.

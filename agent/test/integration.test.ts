@@ -19,6 +19,9 @@ const hasCodex = spawnSync("codex", ["--version"], { encoding: "utf8" }).status 
 
 type Req = { auth?: string; body: any };
 const requests: Req[] = [];
+// skills/ModelInstructions.md. Newer Codex sends it as a developer message in `input`, older Codex as `instructions`.
+const AGENT_PROMPT = "You are OpenClicky's temporary Codex agent mode.";
+const isAgentTurn = (r: Req) => JSON.stringify(r.body).includes(AGENT_PROMPT);
 let server: http.Server;
 let url: string;
 
@@ -85,7 +88,7 @@ afterAll(() => server.close());
 const mk = () => {
   const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "oc-it-home-"));
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "oc-it-ws-"));
-  return { codexHome, workspace, cfg: resolveConfig({ backendUrl: url, token: "test-token", codexHome, workspace, model: "gpt-5.2" }) };
+  return { codexHome, workspace, cfg: resolveConfig({ openaiBaseUrl: `${url}/v1`, openaiApiKey: "test-token", codexHome, workspace, model: "gpt-5.2" }) };
 };
 
 describe.skipIf(!hasCodex)("CodexAgent (real codex, fake model)", () => {
@@ -97,9 +100,8 @@ describe.skipIf(!hasCodex)("CodexAgent (real codex, fake model)", () => {
     try {
       await agent.start();
       const r1 = await agent.run("create a file called hello.txt containing 'hi'");
-      const first = requests.find((r) => r.body.instructions)!;
+      const first = requests.find(isAgentTurn)!;
       expect(first.body.model).toBe("gpt-5.2");
-      expect(first.body.instructions).toMatch(/^You are OpenClicky's temporary Codex agent mode\./); // skills/ModelInstructions.md
       expect(JSON.stringify(first.body)).toContain("openclicky-artifacts"); // skills/ loaded via [[skills.config]]
       expect(r1.status).toBe("completed");
       expect(r1.error).toBeUndefined();
@@ -114,7 +116,7 @@ describe.skipIf(!hasCodex)("CodexAgent (real codex, fake model)", () => {
       expect(r2.threadId).toBe(r1.threadId);
       expect(r2.status).toBe("completed");
       expect(r2.finalMessage).toBe("ack: what did you just do?");
-      const resumed = requests.slice(seenBeforeResume).find((r) => r.body.instructions)!;
+      const resumed = requests.slice(seenBeforeResume).find(isAgentTurn)!;
       const texts = JSON.stringify(resumed.body.input);
       expect(texts).toContain("hello.txt"); // prior turn is in the resumed context
       expect(texts).toContain("what did you just do?");
@@ -166,6 +168,27 @@ describe.skipIf(!hasCodex)("CodexAgent (real codex, fake model)", () => {
     }
   }, 90_000);
 
+  it("prunes a thread and its session file only once it is past the limit", async () => {
+    const { codexHome, cfg } = mk();
+    const agent = new CodexAgent(cfg, {});
+    const sessionFiles = (id: string) => fs.readdirSync(path.join(codexHome, "sessions"), { recursive: true }).filter((f) => String(f).includes(id));
+    try {
+      await agent.start();
+      const { threadId } = await agent.run("say something to keep");
+      expect(sessionFiles(threadId)).toHaveLength(1);
+
+      expect(await agent.pruneThreads(14)).toEqual([]);
+      expect(await agent.pruneThreads(0, Date.now() + 30 * 86_400_000)).toEqual([]); // 0 keeps everything
+      expect((await agent.listThreads(10)).map((t) => t.id)).toContain(threadId);
+
+      expect(await agent.pruneThreads(14, Date.now() + 30 * 86_400_000)).toEqual([threadId]);
+      expect((await agent.listThreads(10)).map((t) => t.id)).not.toContain(threadId);
+      expect(sessionFiles(threadId)).toHaveLength(0);
+    } finally {
+      await agent.stop();
+    }
+  }, 60_000);
+
   it("attaches an image when present and continues when missing", async () => {
     const { workspace, cfg } = mk();
     const events: string[] = [];
@@ -181,7 +204,7 @@ describe.skipIf(!hasCodex)("CodexAgent (real codex, fake model)", () => {
       const before = requests.length;
       const r2 = await agent.run("describe this", { threadId: r.threadId, imagePath: png });
       expect(r2.status).toBe("completed");
-      const req = requests.slice(before).find((x) => x.body.instructions)!;
+      const req = requests.slice(before).find(isAgentTurn)!;
       expect(JSON.stringify(req.body.input)).toContain("input_image");
     } finally {
       await agent.stop();

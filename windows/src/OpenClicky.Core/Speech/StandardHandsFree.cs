@@ -6,7 +6,7 @@
 //  this PC (loudness against the room's own noise, half a second kept from before the speech so the
 //  first word is whole), transcribed by the ask lane's engine, and asked exactly as if Ctrl + Win had
 //  been held for it. Slower than fast voice (the answer comes after the person stops, not while they
-//  finish), but it works on any key, a plan, or a free account. The microphone and the gate that keeps
+//  finish), but it works on any key or a plan. The microphone and the gate that keeps
 //  it deaf while Clicky answers are CompanionManager.StandardHandsFree.cs.
 //
 

@@ -180,11 +180,11 @@ public sealed class TakeFormatterTests
     {
         public string DisplayName => "limit";
         public Task<string> PolishAsync(string system, string user, CancellationToken cancellationToken = default) =>
-            throw AccountPolishException.ForLimit(AccountLimitError.DailyLimit);
+            throw TakePolishException.Refused("limit", 429, "out of credit");
     }
 
     [Fact]
-    public async Task ALimitedAccountStillGetsTheLocallyFormattedTake()
+    public async Task ARefusedPolishStillGetsTheLocallyFormattedTake()
     {
         var result = await TakeFormatter.FormatAsync("hello there", Context(), new LimitPolisher(), wantsModel: true);
         Assert.Equal("Hello there", result.Text);

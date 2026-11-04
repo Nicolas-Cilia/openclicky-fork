@@ -58,7 +58,7 @@ nonisolated struct ModelDownload: Sendable {
         try await Task.detached {
             let tar = Process()
             tar.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
-            tar.arguments = ["-xjf", archive.path, "-C", folder.path]
+            tar.arguments = ["-xf", archive.path, "-C", folder.path]
             try tar.run()
             tar.waitUntilExit()
             guard tar.terminationStatus == 0 else { throw ModelDownloadError.unpackFailed("tar exited with \(tar.terminationStatus)") }

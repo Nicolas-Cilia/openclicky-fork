@@ -577,7 +577,11 @@ internal sealed class WordsPageView : ScrollViewer
 
     private void Delete(TakeRecord take)
     {
-        if (!HistoryWrite("delete", take.Id, () => services.TakeStore?.Delete(take.Id)))
+        if (HistoryWrite("delete", take.Id, () => services.TakeStore?.Delete(take.Id)))
+        {
+            services.AudioStore.Discard(take.Id);
+        }
+        else
         {
             historyProblem = "Couldn't delete that take. The log says why.";
         }
@@ -658,7 +662,10 @@ internal static class TakeDetailSheet
         pasteAgain.ToolTip = "Minimizes OpenClicky, then pastes into the app behind it";
         sheet.AddFooterButton("Delete", () =>
         {
-            WordsPageView.HistoryWrite("delete", take.Id, () => services.TakeStore?.Delete(take.Id));
+            if (WordsPageView.HistoryWrite("delete", take.Id, () => services.TakeStore?.Delete(take.Id)))
+            {
+                services.AudioStore.Discard(take.Id);
+            }
             services.History.HistoryDidChange();
             sheet.Close();
         }, alignLeft: true, appearance: WpfUi.ControlAppearance.Danger);

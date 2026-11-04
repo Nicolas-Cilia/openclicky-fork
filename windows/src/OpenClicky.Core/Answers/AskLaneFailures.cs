@@ -12,7 +12,7 @@ using OpenClicky.Core.Providers;
 namespace OpenClicky.Core.Answers;
 
 /// <summary>
-/// The screenshot for a question could not be taken, as opposed to the backend failing
+/// The screenshot for a question could not be taken, as opposed to the answer failing
 /// (Swift `CompanionManager.AskScreenCaptureError`).
 /// </summary>
 public sealed class AskScreenCaptureException(Exception underlyingError)
@@ -45,14 +45,12 @@ public static class AskLaneFailures
         _ => false,
     };
 
-    /// <summary>The refusal of a question (ClaudeAPI's /chat, or Anthropic on an own key), as it came; null for anything else.</summary>
-    public static BackendHttpException? RefusedQuestion(Exception error) =>
-        error is BackendHttpException { Service: BackendHttpException.ServiceKind.Answers } refusal ? refusal : null;
+    /// <summary>The refusal of a question by Anthropic on an own key, as it came; null for anything else.</summary>
+    public static AnswerHttpException? RefusedQuestion(Exception error) => error as AnswerHttpException;
 
     /// <summary>
-    /// What the companion says when a question fails for a reason that is not the account's
-    /// (sign-in and limits have their own sentences). The token sentence is kept for the backend
-    /// refusing the token; a capture failure or a dropped connection says what actually happened.
+    /// What the companion says when a question fails. A capture failure or a dropped connection says
+    /// what actually happened.
     /// </summary>
     /// <param name="screenRecordingAllowed">
     /// The Mac's Screen Recording permission. Windows has no such switch for a desktop app's
@@ -60,7 +58,7 @@ public static class AskLaneFailures
     /// </param>
     public static string AskFailureSentence(Exception error, bool screenRecordingAllowed = true)
     {
-        // No key for Claude and no account: say which key would do.
+        // Nothing set up to answer: say what would do.
         if (error is ProviderRouteUnavailableException unavailable) return unavailable.Sentence;
         if (error is AskScreenCaptureException)
         {
@@ -68,10 +66,10 @@ public static class AskLaneFailures
                 ? "i couldn't see your screen just now. please ask again."
                 : "screen recording is off for openclicky. turn it on in settings, privacy and security, screen recording.";
         }
-        if (IsUnreachable(error)) return "i couldn't reach openclicky. check your internet and ask again.";
+        if (IsUnreachable(error)) return "i couldn't reach the ai just now. check your internet and ask again.";
         if (RefusedQuestion(error) is { Status: 401 or 403 })
         {
-            return "something went wrong talking to the openclicky backend. check the backend and your token in the settings file.";
+            return "your own api key was refused. check it in settings, keys & plans.";
         }
         // Not an HTTP refusal: the stream had started when Anthropic reported the failure.
         if (error is ClaudeApiException { Code: ClaudeAPI.MidStreamErrorCode }) return "the answer stopped partway. please ask again.";

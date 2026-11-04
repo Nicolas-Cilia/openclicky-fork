@@ -4,9 +4,8 @@ import path from "node:path";
 import readline from "node:readline";
 import { resolveConfig, type AgentConfig } from "./config.js";
 import { readVersion } from "./version.js";
-import { canCallBackend, MISSING_CREDENTIALS } from "./backendHeaders.js";
 import { CodexAgent, type ApprovalRequest, type ApprovalDecision, type RunResult, buildChildEnv } from "./codex.js";
-import { ensureCodexHome } from "./codexHome.js";
+import { ensureCodexHome, codexCredentialsProblem } from "./codexHome.js";
 import { ask } from "./ask.js";
 import { gate, type Lane } from "./gate.js";
 import { captureScreen } from "./screenshot.js";
@@ -18,7 +17,7 @@ import { spawnTarget } from "./winSpawn.js";
 const program = new Command();
 program
   .name("openclicky")
-  .description("OpenClicky headless agent: run tasks through Codex via the OpenClicky backend, or ask quick questions.")
+  .description("OpenClicky headless agent: run tasks through Codex on your ChatGPT plan or own key, or ask quick questions.")
   .version(readVersion());
 
 /**
@@ -62,8 +61,6 @@ const propagate = (e: unknown): never => {
 
 const withCommonOptions = (cmd: Command) =>
   cmd
-    .option("--backend-url <url>", "OpenClicky backend URL (env BACKEND_URL; default https://api.openclicky.org, the hosted backend — point it at http://localhost:8787 to use your own)")
-    .option("--token <token>", "Supabase JWT or session token (env OPENCLICKY_TOKEN)")
     .option("--image <path>", "attach a local screenshot/image")
     .option("--screenshot", "capture the screen now (macOS screencapture, Windows, Linux grim/gnome-screenshot/spectacle/scrot/import) and attach it")
     .option("--json", "print the result as JSON")
@@ -82,8 +79,6 @@ const withRunOptions = (cmd: Command) =>
 
 function configFrom(opts: Record<string, any>): AgentConfig {
   return resolveConfig({
-    backendUrl: opts.backendUrl,
-    token: opts.token,
     workspace: opts.cwd ? path.resolve(opts.cwd) : undefined,
     model: opts.model,
     verbose: opts.verbose ? true : undefined,
@@ -97,45 +92,6 @@ function resolveImage(opts: Record<string, any>): string | undefined {
     return p;
   }
   return opts.image;
-}
-
-/**
- * Prompt for a password on the terminal without echoing the typed characters back. `readline` has
- * no built-in "hidden input" mode, so muting its own echo of what it reads — after it has written
- * the prompt text itself — is the standard workaround for this (the same trick tools like npm's own
- * prompts use); it still reads and returns every keystroke, it just stops printing them.
- */
-async function promptPassword(promptText: string): Promise<string> {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
-    let echo = true;
-    (rl as unknown as { _writeToOutput: (s: string) => void })._writeToOutput = (s) => {
-      if (echo) process.stderr.write(s);
-    };
-    rl.question(promptText, (answer) => {
-      rl.close();
-      process.stderr.write("\n");
-      resolve(answer);
-    });
-    echo = false; // prompt text above is already written; stop echoing from here on
-  });
-}
-
-/**
- * `--password` puts the password in shell history and in `ps` output for every user on the machine
- * for as long as the process runs. `OPENCLICKY_PASSWORD` (an env var is still readable by other
- * processes of the same user, but not by `ps` or a shell's saved history) and an interactive,
- * echo-off prompt are the safe paths and are preferred in that order; the flag still works — some
- * non-interactive scripting setups have no other way to supply it — but warns loudly when used.
- */
-async function resolvePassword(opts: Record<string, any>): Promise<string> {
-  if (opts.password) {
-    process.stderr.write("warning: --password is insecure (visible in shell history and `ps`); prefer OPENCLICKY_PASSWORD or the interactive prompt\n");
-    return opts.password;
-  }
-  if (process.env.OPENCLICKY_PASSWORD) return process.env.OPENCLICKY_PASSWORD;
-  if (process.stdin.isTTY) return promptPassword("password: ");
-  return fail("password required: set OPENCLICKY_PASSWORD, pass --password, or run `token` from an interactive terminal");
 }
 
 /** Interactive approval prompt on the terminal (stderr/stdin), used with --approve. */
@@ -153,7 +109,8 @@ async function promptApproval(req: ApprovalRequest): Promise<ApprovalDecision> {
 }
 
 async function runAgent(cfg: AgentConfig, task: string, opts: Record<string, any>): Promise<RunResult> {
-  if (!canCallBackend(cfg)) fail(MISSING_CREDENTIALS);
+  const credentialsProblem = codexCredentialsProblem(cfg);
+  if (credentialsProblem) fail(credentialsProblem);
   let streamed = false;
   const agent = new CodexAgent(cfg, {
     onEvent: note,
@@ -188,6 +145,8 @@ async function runAgent(cfg: AgentConfig, task: string, opts: Record<string, any
 }
 
 async function runAsk(cfg: AgentConfig, question: string, opts: Record<string, any>): Promise<string> {
+  // No key for the direct ask lane: the plan answers through Codex instead.
+  if (!cfg.openaiApiKey) return (await runAgent(cfg, question, opts)).finalMessage;
   let streamed = false;
   const answer = await ask(cfg, question, {
     imagePath: resolveImage(opts),
@@ -216,7 +175,7 @@ withRunOptions(withCommonOptions(program.command("run").description("full agent 
   },
 );
 
-withCommonOptions(program.command("ask").description("quick answer through the backend (no agent spawn)").argument("<question...>", "the question")).action(
+withCommonOptions(program.command("ask").description("quick answer (own OpenAI key; without one, a Codex run on your ChatGPT plan)").argument("<question...>", "the question")).action(
   async (parts: string[], opts) => {
     try {
       await runAsk(configFrom(opts), parts.join(" "), opts);
@@ -308,8 +267,6 @@ withRunOptions(
 program
   .command("talk")
   .description("always-on voice conversation via OpenAI Realtime (mic → speech in/out); work is handed to a Codex thread")
-  .option("--backend-url <url>", "OpenClicky backend URL (env BACKEND_URL)")
-  .option("--token <token>", "Supabase JWT or session token (env OPENCLICKY_TOKEN)")
   .option("--voice <name>", "Realtime voice (e.g. marin, cedar, alloy)")
   .option("--device <index>", "microphone: AVFoundation index (macOS), DirectShow index or name (Windows)", "0")
   .option("--cwd <dir>", "working directory for agent tasks")
@@ -420,6 +377,23 @@ threads
         for (const c of t.commands) process.stdout.write(`  ran: ${c}\n`);
         for (const a of t.agent) process.stdout.write(`  agent: ${a}\n`);
       }
+    } catch (e) {
+      propagate(e);
+    }
+  });
+
+threads
+  .command("prune")
+  .description("delete threads, and the screenshots saved in them, untouched for this many days")
+  .requiredOption("--older-than-days <n>", "age limit in days; 0 keeps everything")
+  .option("--json", "print JSON")
+  .option("--verbose")
+  .action(async (opts) => {
+    try {
+      const days = Number(opts.olderThanDays);
+      if (!Number.isInteger(days) || days < 0) throw new Error("--older-than-days takes a whole number, 0 or more");
+      const deleted = days === 0 ? [] : await withThreadAgent(opts, (a) => a.pruneThreads(days));
+      process.stdout.write(opts.json ? JSON.stringify({ deleted }) + "\n" : `deleted ${deleted.length} thread(s)\n`);
     } catch (e) {
       propagate(e);
     }
@@ -548,47 +522,6 @@ const toggleSkill = (id: string, on: boolean) => {
 skills.command("activate").description("activate a skill").argument("<id>").action((id: string) => toggleSkill(id, true));
 skills.command("deactivate").description("deactivate a skill").argument("<id>").action((id: string) => toggleSkill(id, false));
 skills.command("path").description("print the library directory").action(() => void process.stdout.write(resolveConfig().userSkillsDir + "\n"));
-
-program
-  .command("token")
-  .description("sign in to Supabase with email/password and exchange the JWT for an OpenClicky session token")
-  .requiredOption("--email <email>")
-  .option("--password <password>", "insecure: visible in shell history and `ps`; prefer env OPENCLICKY_PASSWORD or the interactive prompt")
-  .option("--supabase-url <url>", "env SUPABASE_URL")
-  .option("--anon-key <key>", "env SUPABASE_ANON_KEY")
-  .option("--backend-url <url>", "env BACKEND_URL")
-  .option("--jwt-only", "print the Supabase JWT instead of exchanging it")
-  .action(async (opts) => {
-    const cfg = resolveConfig({ backendUrl: opts.backendUrl });
-    let supabaseUrl = (opts.supabaseUrl ?? process.env.SUPABASE_URL ?? "").replace(/\/+$/, "");
-    let anonKey = opts.anonKey ?? process.env.SUPABASE_ANON_KEY;
-    try {
-      const password = await resolvePassword(opts);
-      if (!supabaseUrl || !anonKey) {
-        // The backend publishes its sign-in details, so only the backend URL is needed.
-        const configRes = await fetch(`${cfg.backendUrl}/auth/config`);
-        if (!configRes.ok) fail(`SUPABASE_URL and SUPABASE_ANON_KEY are required (flags or env), and ${cfg.backendUrl}/auth/config is not available (${configRes.status})`);
-        const authConfig = (await configRes.json()) as { supabaseUrl: string; publishableKey: string };
-        supabaseUrl = supabaseUrl || authConfig.supabaseUrl;
-        anonKey = anonKey || authConfig.publishableKey;
-      }
-      const signIn = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
-        method: "POST",
-        headers: { "content-type": "application/json", apikey: anonKey },
-        body: JSON.stringify({ email: opts.email, password }),
-      });
-      if (!signIn.ok) fail(`supabase sign-in failed (${signIn.status}): ${(await signIn.text()).slice(0, 300)}`);
-      const { access_token } = (await signIn.json()) as { access_token: string };
-      if (opts.jwtOnly) return void process.stdout.write(access_token + "\n");
-      const ex = await fetch(`${cfg.backendUrl}/agent/session-token`, { method: "POST", headers: { authorization: `Bearer ${access_token}` } });
-      if (!ex.ok) fail(`session-token exchange failed (${ex.status}): ${(await ex.text()).slice(0, 300)}`);
-      const { token, expiresAt } = (await ex.json()) as { token: string; expiresAt: number };
-      process.stderr.write(`session token expires at ${new Date(expiresAt * 1000).toISOString()}\n`);
-      process.stdout.write(token + "\n");
-    } catch (e) {
-      propagate(e);
-    }
-  });
 
 // The only place that actually exits: reached only after every action's own try/finally (which
 // stops any Codex child it started) has already run its course while the rejection unwound here.

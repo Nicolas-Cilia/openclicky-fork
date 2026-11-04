@@ -26,8 +26,8 @@ public sealed partial class CompanionManager
     private bool didGreetRealtime;
     private bool didConfigureRealtimeCallbacks;
 
-    /// <summary>Realtime answers: switched on, something to mint a session with, and an account kind that has it.</summary>
-    public bool UsesRealtimeVoice => IsRealtimeVoiceEnabled && OpenClickyConfiguration.IsConfigured && AccountCapabilities.Current().UsesRealtime;
+    /// <summary>Realtime answers: switched on, and a key to mint a session with.</summary>
+    public bool UsesRealtimeVoice => IsRealtimeVoiceEnabled && OpenClickyConfiguration.IsConfigured && ProviderCapabilities.Current().UsesRealtime;
 
     /// <summary>Settings → Voice picked another fast voice vendor: the next connection is made with it.</summary>
     public void RealtimeProviderChanged() => WarmUpRealtimeVoice();
@@ -304,7 +304,7 @@ public sealed partial class CompanionManager
             VoiceState = CompanionVoiceState.Idle;
             LastQuestionFailed = true;
             SpeakWithSystemVoice("Realtime voice is unavailable right now.");
-            // Why, on screen: "check the backend" sent people looking at the network when the answer was a rejected key.
+            // Why, on screen: the reason is usually a rejected key, not the network.
             Overlay.StreamCursorCaption(error.Message, holdSeconds: 12);
         }
     }

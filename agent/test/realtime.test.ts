@@ -81,7 +81,7 @@ describe("realtime", () => {
     const transcripts: string[] = [];
     const events: string[] = [];
     const tasks: string[] = [];
-    const cfg = resolveConfig({ backendUrl, token: "tok" });
+    const cfg = resolveConfig({ openaiBaseUrl: `${backendUrl}/v1`, openaiApiKey: "tok" });
     const session = new RealtimeSession({
       cfg,
       realtimeUrl: wsUrl,
@@ -98,7 +98,7 @@ describe("realtime", () => {
     await session.start();
     await Promise.race([session.waitForClose(), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 10_000))]);
 
-    expect(backendSeen[0]).toMatchObject({ url: "/agent/realtime/session", auth: "Bearer tok", body: { voice: "marin" } });
+    expect(backendSeen[0]).toMatchObject({ url: "/v1/realtime/client_secrets", auth: "Bearer tok", body: { session: { type: "realtime" } } });
     expect(serverSeen[0].url).toBe("/?model=gpt-realtime-test");
     expect(protocolsSeen).toContain("openai-insecure-api-key.ek_test_123");
     expect(serverSeen.find((m) => m.type === "session.update").session.tools[0].name).toBe("send_to_agent");
@@ -113,7 +113,7 @@ describe("realtime", () => {
     expect(events.some((e) => e === "listening…")).toBe(true);
   }, 20_000);
 
-  it("fails clearly without a token or when the backend refuses", async () => {
-    await expect(new RealtimeSession({ cfg: resolveConfig({ backendUrl, token: undefined }, {}) }).start()).rejects.toThrow(/needs your own OpenAI key/);
+  it("fails clearly without a key or when the backend refuses", async () => {
+    await expect(new RealtimeSession({ cfg: resolveConfig({ openaiBaseUrl: `${backendUrl}/v1`, openaiApiKey: undefined }, {}) }).start()).rejects.toThrow(/needs your own OpenAI key/);
   });
 });

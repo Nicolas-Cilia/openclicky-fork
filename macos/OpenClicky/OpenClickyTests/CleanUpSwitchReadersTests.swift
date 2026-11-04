@@ -54,7 +54,7 @@ struct CleanUpSwitchReadersTests {
         }
     }
 
-    /// The 0.8.0 upgrader: "polish with a model" was turned off, and a free account's default then
+    /// The 0.8.0 upgrader: "polish with a model" was turned off, and the old default then
     /// turned "also polish offline takes" on. Nothing is polished, so nothing may say it is.
     @Test func anUpgraderWithTheOldSwitchOffSeesItOff() {
         let settings = makeSettings(polishWithModel: false, polishOfflineTakes: true, engine: .offline)

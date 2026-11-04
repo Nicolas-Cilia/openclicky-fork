@@ -24,21 +24,21 @@ public static class AnswerProviderFactory
         switch (source)
         {
             case AnswerSource.OpenAI or AnswerSource.OpenRouter or AnswerSource.Groq or AnswerSource.Mistral or AnswerSource.Xai:
-                if (credentials.Key(source) is not { } key || model is null) throw Missing(source, "add its key in settings, account.");
+                if (credentials.Key(source) is not { } key || model is null) throw Missing(source, "add its key in settings, keys & plans.");
                 return new OpenAIChatAnswerProvider(source, key, model);
             case AnswerSource.Gemini:
-                if (credentials.GeminiKey is not { } geminiKey || model is null) throw Missing(source, "add its key in settings, account.");
+                if (credentials.GeminiKey is not { } geminiKey || model is null) throw Missing(source, "add its key in settings, keys & plans.");
                 return new GeminiAnswerProvider(geminiKey, model);
             case AnswerSource.ClaudeCodePlan:
                 var claudePath = await (locateClaudeCode ?? (() => PlanCLIs.ClaudeCodePathAsync(cancellationToken: cancellationToken)))().ConfigureAwait(false);
                 if (claudePath is null) throw Missing(source, "the claude code app (claude) isn't installed on this pc.");
-                return new ClaudeCodeAnswerProvider(claudePath, model);
+                return new ClaudeCodeAnswerProvider(claudePath, model, usageSink: PlanUsageSink.Live);
             case AnswerSource.CodexPlan:
                 var codexPath = await (locateCodex ?? PlanCLIs.CodexPathAsync)().ConfigureAwait(false);
                 if (codexPath is null) throw Missing(source, "codex isn't installed on this pc.");
-                return new CodexAnswerProvider(codexPath, model);
+                return new CodexAnswerProvider(codexPath, model, usageSink: PlanUsageSink.Live);
             default:
-                // ClaudeAPI answers these itself (Anthropic, the account); the router never hands them over.
+                // ClaudeAPI answers Anthropic itself; the router never hands it over.
                 throw Missing(source, "answers through openclicky's own path.");
         }
     }

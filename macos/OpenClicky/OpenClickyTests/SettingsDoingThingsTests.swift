@@ -3,7 +3,7 @@
 //  OpenClickyTests
 //
 //  The two rows "do things for me" adds to Settings: which inbox (Clicky › More) and own Spotify
-//  credentials (Keys & Account). The views themselves are not tested; their pure mappings are.
+//  credentials (Keys & Plans). The views themselves are not tested; their pure mappings are.
 //
 
 import Testing

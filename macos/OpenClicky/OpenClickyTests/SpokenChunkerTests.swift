@@ -107,7 +107,7 @@ struct SpokenChunkerTests {
         #expect(chunker.feed(accumulated: "that came out in 1990. after") == ["that came out in 1990."])
     }
 
-    // F-40: the backend speaks at most 400 characters of a piece (JavaScript length, UTF-16), so no
+    // F-40: a voice is given at most 400 characters of a piece (JavaScript length, UTF-16), so no
     // piece may be longer than about 350, whatever the language or punctuation.
     @Test(arguments: [
         ("english, no sentence end", String(repeating: "word ", count: 400)),

@@ -24,15 +24,15 @@ nonisolated enum AnswerProviderFactory {
             guard let path = await PlanCLIs.claudeCodePath() else {
                 throw missing(source, "the claude code app (claude) isn't installed on this mac.")
             }
-            return ClaudeCodeAnswerProvider(executablePath: path, model: model)
+            return ClaudeCodeAnswerProvider(executablePath: path, model: model, usageSink: .live)
         case .codexPlan:
             guard let path = await PlanCLIs.codexPath() else {
                 throw missing(source, "codex isn't installed on this mac.")
             }
-            return CodexAnswerProvider(executablePath: path, model: model)
-        case .anthropic, .openClickyAccount:
-            // ClaudeAPI answers these itself; the router never hands them over.
-            throw missing(source, "answers through openclicky's own path.")
+            return CodexAnswerProvider(executablePath: path, model: model, usageSink: .live)
+        case .anthropic:
+            // ClaudeAPI answers this itself; the router never hands it over.
+            throw missing(source, "answers through its own path.")
         }
     }
 

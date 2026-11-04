@@ -1,8 +1,8 @@
 // The rules and sentences the Settings rows read, kept out of the views so they can be tested:
 // the clean-up switch (DictationCleanUpRow), the Your words page's engine sentence
-// (WordsPageView.engineSentenceInSentenceCase, sentenceCased), the provider keys of Keys & Account
+// (WordsPageView.engineSentenceInSentenceCase, sentenceCased), the provider keys of Keys & Plans
 // (KeyProvider), the plan rows (PlanSubscriptionRow.detail), the account rows
-// (BackendEngineUsageRow, PlanSummary, the sidebar foot), "Answers come from"'s "Now:" line, the
+// "Answers come from"'s "Now:" line, the
 // account form's rules (EmailAccountForm.canSubmitEmail / canSubmitCode, AccountWorkSlot), and the
 // window's appearance (followAppearanceSetting).
 
@@ -33,7 +33,7 @@ public static class DictationCleanUp
     /// <summary>The row's copy. There is no on-device model on Windows, so the words are always tidied online.</summary>
     public static string Detail(bool hasModel)
     {
-        var needsModelNote = hasModel ? "" : " Needs an AI key (Settings → Keys & Account) or a free OpenClicky account.";
+        var needsModelNote = hasModel ? "" : " Needs an AI key (Settings → Keys & Plans).";
         return "Adds punctuation and fixes numbers. Your words are sent online to be tidied, so they appear when you let go. Off: words type straight in as you speak." + needsModelNote;
     }
 }
@@ -56,7 +56,7 @@ public static class WordsPageSentences
 
     private static readonly (string Lowercase, string Proper)[] ProperNames =
     [
-        ("openclicky", "OpenClicky"), ("openai", "OpenAI"), ("assemblyai", "AssemblyAI"), ("sarvam", "Sarvam"), ("pc", "PC"), ("windows", "Windows"),
+        ("openclicky", "OpenClicky"), ("openai", "OpenAI"), ("sarvam", "Sarvam"), ("pc", "PC"), ("windows", "Windows"),
     ];
 
     /// <summary>
@@ -138,7 +138,7 @@ public static class WordsPageSentences
     }
 }
 
-/// <summary>A provider a key can be saved for (Keys & Account): where it lives in shell.json and how its row reads.</summary>
+/// <summary>A provider a key can be saved for (Keys & Plans): where it lives in shell.json and how its row reads.</summary>
 public enum ProviderKey
 {
     OpenAI, Anthropic, OpenRouter, Gemini, Groq, Mistral, Xai, Sarvam, ElevenLabs, GoogleCloud, AmazonPolly, Spotify,
@@ -294,7 +294,7 @@ public static class PlanSubscription
         plan == AnswerSource.ClaudeCodePlan ? shell.UseClaudeCodePlan == true : shell.UseCodexPlan == true;
 }
 
-public static class AccountRows
+public static class PlanRows
 {
     /// <summary>"Now: …" under "Answers come from": who answers a Claude-lane question with these credentials.</summary>
     public static string NowAnswering(ProviderCredentials credentials)
@@ -303,83 +303,41 @@ public static class AccountRows
         return route.Kind switch
         {
             ProviderRouteKind.AnthropicDirect => AnswerSource.Anthropic.DisplayName(),
-            ProviderRouteKind.Backend => AnswerSource.OpenClickyAccount.DisplayName(),
             ProviderRouteKind.AnswerProvider => route.Source!.Value.DisplayName(),
             ProviderRouteKind.OpenAIDirect => AnswerSource.OpenAI.DisplayName(),
             _ => "nothing set up yet",
         };
     }
 
-    /// <summary>The "OpenAI and AssemblyAI" row's copy and badge.</summary>
-    public static (string Detail, string Badge) BackendEngineUsage(bool usesOwnKeys, bool hasAccountToken)
+    /// <summary>What the "When it runs out" row says under the picker.</summary>
+    public static string BackupDetail(ProviderCredentials credentials) =>
+        credentials.BackupSource is { } backup
+            ? $"{backup.ShortName()} answers until the default's limit resets. Agent tasks only run on Codex, so they pause instead."
+            : "No backup: link both plans to have one.";
+
+    /// <summary>A plan's usage row: what OpenClicky sent, and what the plan's own report says.</summary>
+    public static string UsageDetail(PlanUsageTotals today, PlanUsageTotals month, PlanLimitSnapshot? snapshot, DateTimeOffset? pausedUntil)
     {
-        if (usesOwnKeys)
+        static string Line(PlanUsageTotals totals) =>
+            $"{totals.Requests} {(totals.Requests == 1 ? "request" : "requests")}, {totals.Tokens:N0} tokens";
+        var lines = new List<string> { $"OpenClicky today: {Line(today)}.", $"This month: {Line(month)}." };
+        if (month.EstimatedCostUSD is { } cost)
         {
-            return (hasAccountToken
-                ? "OpenAI runs straight on your own key, not metered. AssemblyAI is on your account."
-                : "OpenAI runs straight on your own key, not metered. AssemblyAI needs an account.", "Your key");
+            lines.Add(string.Create(CultureInfo.InvariantCulture, $"About ${cost:0.00} at list price this month; your plan isn't charged this."));
         }
-        return hasAccountToken
-            ? ("Through OpenClicky, counted against your free allowance.", "Allowance")
-            : ("Through OpenClicky. Needs an account or your own OpenAI key.", "Needs account");
+        if (snapshot?.CreditsBalance is { } balance) lines.Add($"Credits left: {balance}.");
+        if (pausedUntil is { } until) lines.Add($"Out of usage until {until.ToLocalTime():t}.");
+        if (snapshot is null || snapshot.Windows.Count == 0) lines.Add("Limits appear after its next request.");
+        return string.Join("\n", lines);
     }
 
-    /// <summary>What the "Free allowance" row shows.</summary>
-    public sealed record PlanSummaryState(string Trailing, string? Caption, double? FractionUsed, string? Details);
-
-    public static PlanSummaryState PlanSummary(BillingSummary? summary, string? errorText, bool usesOwnKeys, bool hasAccountToken)
+    /// <summary>"resets 3:40 PM", or the date too when it isn't today; null with nothing to say.</summary>
+    public static string? ResetText(DateTimeOffset? date, DateTimeOffset? now = null)
     {
-        if (summary is not null)
-        {
-            if (summary.Byok) return new("Your keys", "OpenClicky meters nothing: every request runs on your own key.", null, null);
-            if (!summary.IsMetered) return new("Not metered", "This backend meters nothing: every request runs without an allowance.", null, null);
-            if (summary.IsSwitchedOff) return new("Paused", BillingSummary.SwitchedOffMessage, null, null);
-            var fraction = Math.Clamp(summary.FractionUsed, 0, 1);
-            return new($"{(int)Math.Round(summary.FractionUsed * 100, MidpointRounding.AwayFromZero)}% used", null, fraction, summary.UsageDetails());
-        }
-        if (usesOwnKeys) return new("Your keys", "No account needed: your keys in shell.json go straight to OpenAI and Anthropic, and nothing is metered.", null, null);
-        // No sign-in, so there is no allowance to fetch (waiting for a summary said Loading… forever).
-        if (!hasAccountToken) return new("Sign in to see usage", null, 0, null);
-        return new(errorText ?? "Loading…", null, null, null);
-    }
-
-    /// <summary>"prasanth" for a signed-in address, else the first name and the last initial ("Prasanth S."), else "You".</summary>
-    public static string AccountName(string? email, string? fullUserName)
-    {
-        if (email is not null) return email.Split('@')[0];
-        var nameParts = (fullUserName ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (nameParts.Length == 0) return "You";
-        if (nameParts.Length > 1) return $"{nameParts[0]} {char.ToUpper(nameParts[^1][0], CultureInfo.CurrentCulture)}.";
-        return nameParts[0];
-    }
-
-    public static string AccountInitial(string accountName) =>
-        accountName.Length == 0 ? "?" : accountName[..1].ToUpper(CultureInfo.CurrentCulture);
-
-    /// <summary>The sidebar foot's second line.</summary>
-    public static string AccountStanding(bool isSignedInWithEmail, bool isGuestWithoutEmail) =>
-        isSignedInWithEmail ? "Signed in" : isGuestWithoutEmail ? "Trying it free" : "Personal · no account";
-
-    /// <summary>"••••abcd", or "None" with no token.</summary>
-    public static string MaskedToken(string? token) => token is null ? "None" : ProviderKeys.Masked(token);
-}
-
-public static class EmailAccountFormRules
-{
-    /// <summary>Something before an @ and a dot after it.</summary>
-    public static bool CanSubmitEmail(string raw)
-    {
-        var email = raw.Trim();
-        var at = email.IndexOf('@');
-        if (at <= 0) return false;
-        return email[(at + 1)..].Contains('.');
-    }
-
-    /// <summary>Exactly six digits, spaces ignored.</summary>
-    public static bool CanSubmitCode(string raw)
-    {
-        var digits = new string(raw.Where(character => !char.IsWhiteSpace(character)).ToArray());
-        return digits.Length == 6 && digits.All(char.IsAsciiDigit);
+        var current = now ?? DateTimeOffset.Now;
+        if (date is not { } resets || resets <= current) return null;
+        var local = resets.ToLocalTime();
+        return local.Date == current.ToLocalTime().Date ? $"resets {local:t}" : $"resets {local:MMM d, t}";
     }
 }
 

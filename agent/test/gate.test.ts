@@ -37,25 +37,24 @@ describe("gate", () => {
     expect(heuristicLane("how do I fix my repo")).toBe("agent");
     expect(heuristicLane("do the thing")).toBe("agent");
   });
-  it("calls /v1/messages through the backend and returns the model's lane", async () => {
+  it("calls /v1/messages on the own key and returns the model's lane", async () => {
     mode = "ok";
-    const d = await gate(resolveConfig({ backendUrl: url, token: "t" }), "create a file called hello.txt");
+    const d = await gate(resolveConfig({ anthropicBaseUrl: url, anthropicApiKey: "t" }), "create a file called hello.txt");
     expect(d).toEqual({ lane: "ask", reason: "it is a question", gated: true });
     const last = seen.at(-1);
     expect(last.url).toBe("/v1/messages");
-    expect(last.auth).toBe("Bearer t");
-    expect(last.body.model).toBe("default");
+    expect(last.body.model).toBe("claude-haiku-4-5-20251001");
     expect(last.body.system).toContain("launch gate");
   });
   it("falls back to the heuristic when the gate is unavailable or unparseable", async () => {
     mode = "fail";
-    const a = await gate(resolveConfig({ backendUrl: url, token: "t" }), "create a file");
+    const a = await gate(resolveConfig({ anthropicBaseUrl: url, anthropicApiKey: "t" }), "create a file");
     expect(a.gated).toBe(false);
     expect(a.lane).toBe("agent");
     mode = "garbage";
-    const b = await gate(resolveConfig({ backendUrl: url, token: "t" }), "what is a monad");
+    const b = await gate(resolveConfig({ anthropicBaseUrl: url, anthropicApiKey: "t" }), "what is a monad");
     expect(b).toMatchObject({ gated: false, lane: "ask" });
-    const c = await gate(resolveConfig({ backendUrl: "http://127.0.0.1:1", token: "t" }), "what is a monad");
+    const c = await gate(resolveConfig({ anthropicBaseUrl: "http://127.0.0.1:1", anthropicApiKey: "t" }), "what is a monad");
     expect(c.gated).toBe(false);
   });
 });

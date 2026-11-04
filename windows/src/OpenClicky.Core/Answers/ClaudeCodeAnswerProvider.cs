@@ -37,8 +37,11 @@ public sealed class ClaudeCodeAnswerProvider(
     string executablePath,
     string? model = null,
     IPlanCliProcessRunner? processRunner = null,
-    double timeoutSeconds = 90) : IAnswerProvider
+    double timeoutSeconds = 90,
+    PlanUsageSink? usageSink = null) : IAnswerProvider
 {
+    private readonly PlanUsageSink usageSink = usageSink ?? PlanUsageSink.None;
+
     public string ExecutablePath { get; } = executablePath;
     /// <summary>`--model`: an alias ("sonnet", "opus", "haiku") or a full model name; null = the CLI's default.</summary>
     public string? Model { get; } = model;
@@ -96,6 +99,7 @@ public sealed class ClaudeCodeAnswerProvider(
                 if (heldBackText.Length > 0) onTextChunk(heldBackText);
             }
 
+            Report(streamParser.Summary, this.usageSink);
             var answerText = AnswerText(streamParser.Summary, output, TimeoutSeconds);
             if (request.Tools.Count == 0) return new AnswerResult(answerText, []);
             var (spokenText, toolCalls) = PlanToolProtocol.Parse(answerText, request.Tools.Select(tool => tool.Name).ToHashSet());
@@ -108,6 +112,12 @@ public sealed class ClaudeCodeAnswerProvider(
     }
 
     // MARK: building the call
+
+    private static void Report(ClaudeCodeStreamSummary summary, PlanUsageSink sink)
+    {
+        if (summary.Limits is { } limits) sink.Limits(AnswerSource.ClaudeCodePlan, limits);
+        if (summary.Usage is { } sample) sink.Record(sample with { Date = DateTimeOffset.UtcNow });
+    }
 
     public static IReadOnlyList<string> CommandLineArguments(string? model, string systemPrompt)
     {
@@ -232,7 +242,7 @@ public sealed class ClaudeCodeAnswerProvider(
         {
             return "Claude Code is signed out. Open a terminal, run claude, and sign in with your Claude account.";
         }
-        if (lowercasedFailureText.Contains("rate_limit") || lowercasedFailureText.Contains("usage limit"))
+        if (PlanLimitText.Matches(trimmedFailureText))
         {
             return "Your Claude plan has hit its usage limit for now.";
         }
@@ -252,6 +262,10 @@ public sealed record ClaudeCodeStreamSummary
     /// `error` code ("authentication_failed") when no result came.
     /// </summary>
     public string? FailureText { get; init; }
+    /// <summary>The result event's token counts and list-price estimate.</summary>
+    public PlanUsageSample? Usage { get; init; }
+    /// <summary>The last `rate_limit_event`.</summary>
+    public PlanLimitSnapshot? Limits { get; init; }
 }
 
 /// <summary>
@@ -260,6 +274,18 @@ public sealed record ClaudeCodeStreamSummary
 /// </summary>
 public sealed class ClaudeCodeStreamParser
 {
+    /// <summary>A result event's counts. Claude's `input_tokens` leaves out the cached ones, so they are added back.</summary>
+    public static PlanUsageSample? UsageSample(JsonObject resultEvent)
+    {
+        if (resultEvent["usage"] is not JsonObject usage) return null;
+        int Count(string key) => usage[key] is JsonValue value && value.TryGetValue<int>(out var count) ? count : 0;
+        return new PlanUsageSample(
+            DateTimeOffset.UtcNow, AnswerSource.ClaudeCodePlan.Id(), PlanUsageLane.Answer,
+            Count("input_tokens") + Count("cache_read_input_tokens") + Count("cache_creation_input_tokens"),
+            Count("cache_read_input_tokens"), Count("output_tokens"),
+            resultEvent["total_cost_usd"] is JsonValue cost && cost.TryGetValue<double>(out var dollars) ? dollars : null);
+    }
+
     private readonly object gate = new();
     private readonly List<byte> bufferedBytes = [];
     private ClaudeCodeStreamSummary state = new();
@@ -346,7 +372,11 @@ public sealed class ClaudeCodeStreamParser
                     }
                 }
                 return null;
+            case "rate_limit_event":
+                if (streamEvent["rate_limit_info"] is JsonObject rateLimitInfo) state = state with { Limits = PlanLimitSnapshot.FromClaude(rateLimitInfo) };
+                return null;
             case "result":
+                state = state with { Usage = UsageSample(streamEvent) };
                 var resultText = JsonHelpers.String(streamEvent["result"]);
                 var isError = JsonHelpers.Bool(streamEvent["is_error"]) ?? false;
                 var subtype = JsonHelpers.String(streamEvent["subtype"]) ?? "";

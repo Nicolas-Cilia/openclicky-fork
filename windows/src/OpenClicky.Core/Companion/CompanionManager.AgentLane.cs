@@ -17,6 +17,53 @@ public sealed partial class CompanionManager
 {
     /// <summary>The Codex thread reused across agent requests this session, so follow-ups resume it.</summary>
     private string? lastAgentThreadId;
+    private CancellationTokenSource? agentSessionCleanup;
+
+    /// <summary>Deletes agent tasks past the limit in Settings → Privacy, soon after launch and then daily, and whenever the limit changes.</summary>
+    private void StartAgentSessionCleanup()
+    {
+        AgentHousekeeping.RemoveLeftoverScreenshots();
+        AgentSessionLimit.Changed += OnAgentSessionLimitChanged;
+        var cancellation = agentSessionCleanup = new CancellationTokenSource();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(AgentHousekeeping.FirstCleanupDelay, cancellation.Token).ConfigureAwait(false);
+                while (!cancellation.IsCancellationRequested)
+                {
+                    if (ProviderCapabilities.Current().UsesAgent) await openClickyAgentClient.DownloadNodeIfNeededAsync().ConfigureAwait(false);
+                    await DeleteExpiredAgentSessionsAsync(cancellation.Token).ConfigureAwait(false);
+                    await Task.Delay(AgentHousekeeping.CleanupInterval, cancellation.Token).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) { /* the app is closing */ }
+        });
+    }
+
+    private void StopAgentSessionCleanup()
+    {
+        AgentSessionLimit.Changed -= OnAgentSessionLimitChanged;
+        agentSessionCleanup?.Cancel();
+        agentSessionCleanup = null;
+    }
+
+    private void OnAgentSessionLimitChanged() => _ = DeleteExpiredAgentSessionsAsync(CancellationToken.None);
+
+    private async Task DeleteExpiredAgentSessionsAsync(CancellationToken cancellationToken)
+    {
+        var days = AgentSessionLimit.Days(OpenClickyConfiguration.Settings.AgentSessionDays);
+        if (days <= 0 || !openClickyAgentClient.IsToolInstalled) return;
+        try
+        {
+            var deleted = await openClickyAgentClient.PruneThreadsAsync(days, cancellationToken).ConfigureAwait(false);
+            if (deleted.Count > 0) AppLog.Write($"agent: deleted {deleted.Count} task(s) older than {days} days");
+            // A follow-up can't resume a task that is gone: it starts a new one.
+            services.MainThread.Post(() => { if (lastAgentThreadId is { } last && deleted.Contains(last)) lastAgentThreadId = null; });
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception error) { AppLog.Write($"agent: couldn't delete old tasks ({error.Message})"); }
+    }
 
     /// <summary>
     /// Text entry point into the agent lane (the result card's follow-ups, the connect card). Captures
@@ -26,10 +73,10 @@ public sealed partial class CompanionManager
     {
         var trimmedText = text.Trim();
         if (trimmedText.Length == 0 || !OpenClickyConfiguration.IsConfigured) return;
-        // An account has no agent: the backend would refuse it with not_on_plan, so say that plainly.
-        if (!AccountCapabilities.Current().UsesAgent)
+        // Nothing can run the agent: say what would, rather than failing later.
+        if (!ProviderCapabilities.Current().UsesAgent)
         {
-            SpeakWithSystemVoice(AccountLimitError.NotOnPlan.Message());
+            SpeakWithSystemVoice(ProviderCapabilities.Current().AgentPausedSentence ?? AgentNeedsSetupSentence);
             return;
         }
         InterruptCurrentAnswer(includingAgentWork: true);
@@ -57,7 +104,7 @@ public sealed partial class CompanionManager
         {
             AppLog.Write($"agent: follow-up failed ({error.GetType().Name})");
             AgentActivityText = null;
-            SpeakCreditsErrorFallback();
+            SpeakAgentErrorFallback();
         }
         await WaitForSystemVoiceNoticeToEndAsync();
         if (!cancellationToken.IsCancellationRequested)
@@ -96,7 +143,7 @@ public sealed partial class CompanionManager
         string? screenshotPath = null;
         if ((screenCaptures.FirstOrDefault(capture => capture.IsCursorScreen) ?? screenCaptures.FirstOrDefault()) is { } cursorScreenCapture)
         {
-            var path = Path.Combine(Path.GetTempPath(), $"openclicky-{Guid.NewGuid()}.jpg");
+            var path = AgentHousekeeping.NewScreenshotPath();
             try
             {
                 await File.WriteAllBytesAsync(path, cursorScreenCapture.ImageData, CancellationToken.None);
@@ -111,10 +158,19 @@ public sealed partial class CompanionManager
         AgentActivityText = "starting agent…";
         AppLog.Write($"agent: task ({transcript.Length} chars)");
         var startedAt = DateTimeOffset.UtcNow;
-        var result = await openClickyAgentClient.RunAgentAsync(
-            transcript, screenshotPath, lastAgentThreadId,
-            onEvent: milestone => services.MainThread.Post(() => AgentActivityText = milestone),
-            cancellationToken);
+        OpenClickyAgentRunResult result;
+        try
+        {
+            result = await openClickyAgentClient.RunAgentAsync(
+                transcript, screenshotPath, lastAgentThreadId,
+                onEvent: milestone => services.MainThread.Post(() => AgentActivityText = milestone),
+                cancellationToken);
+        }
+        finally
+        {
+            // Codex has read it by the time the run ends, whichever way the run ends.
+            AgentHousekeeping.RemoveScreenshot(screenshotPath);
+        }
         AppLog.Write($"agent task finished in {(DateTimeOffset.UtcNow - startedAt).TotalSeconds:0.0} s ({result.Status})");
 
         if (result.ThreadId is { } threadId) lastAgentThreadId = threadId;

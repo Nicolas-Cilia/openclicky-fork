@@ -150,7 +150,7 @@ struct AnswerProviderHTTPTests {
     @Test func openRouterIsToldWhoIsAsking() throws {
         let urlRequest = try OpenAIChatAnswerProvider.makeURLRequest(source: .openRouter, apiKey: "or-test", model: "anthropic/claude-sonnet-4.6", answerRequest: sampleRequest)
         #expect(urlRequest.url?.host == "openrouter.ai")
-        #expect(urlRequest.value(forHTTPHeaderField: "HTTP-Referer") == "https://github.com/prasanthsasikumar/openclicky")
+        #expect(urlRequest.value(forHTTPHeaderField: "HTTP-Referer") == "https://github.com/Nicolas-Cilia/openclicky-fork")
         #expect(urlRequest.value(forHTTPHeaderField: "X-Title") == "OpenClicky")
         #expect(urlRequest.value(forHTTPHeaderField: "Authorization") == "Bearer or-test")
     }

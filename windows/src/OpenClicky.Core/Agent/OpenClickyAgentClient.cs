@@ -15,6 +15,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using OpenClicky.Core.Configuration;
 using OpenClicky.Core.Platform;
+using OpenClicky.Core.Providers;
 
 namespace OpenClicky.Core.Agent;
 
@@ -27,6 +28,8 @@ public sealed class OpenClickyAgentRunResult
     public string? ThreadId { get; set; }
     public string Status { get; set; } = "unknown";
     public string? ErrorMessage { get; set; }
+    /// <summary>Token counts for the turn, from the CLI.</summary>
+    public JsonObject? Usage { get; set; }
 }
 
 /// <summary>One Codex thread as reported by `openclicky threads list --json`.</summary>
@@ -96,6 +99,11 @@ public sealed record OpenClickyThreadDetail(OpenClickyThreadSummary Thread, IRea
     }
 
     /// <summary>Decodes `threads list --json` (an array; entries without an id are skipped).</summary>
+    public static IReadOnlyList<string> DecodeDeleted(string json) =>
+        JsonNode.Parse(json)?["deleted"] is JsonArray deleted
+            ? deleted.Select(id => id?.GetValue<string>()).OfType<string>().ToList()
+            : [];
+
     public static IReadOnlyList<OpenClickyThreadSummary> DecodeList(string json) =>
         AgentJson.Parse(json) is JsonArray array
             ? array.Select(OpenClickyThreadSummary.From).OfType<OpenClickyThreadSummary>().ToList()
@@ -119,7 +127,7 @@ public sealed class OpenClickyAgentException(string message, Exception? inner = 
     /// doesn't carry it).
     /// </summary>
     public const string ToolMissingMessage =
-        "agents run through the openclicky command-line tool, which isn't on this pc. questions, pointing and quick actions still work.";
+        "agent tasks are still setting up on this pc. try again in a minute. questions, pointing and quick actions still work.";
 }
 
 /// <summary>
@@ -197,6 +205,7 @@ public sealed class OpenClickyAgentEventCollector(Action<string>? onEvent = null
                 Result.Status = "completed";
                 break;
             case "result":
+                Result.Usage = json["usage"] as JsonObject;
                 Result.ThreadId = AgentJson.String(json["threadId"]);
                 Result.Artifacts = json["artifacts"] is JsonArray ? AgentJson.Strings(json["artifacts"]) : [];
                 Result.Status = AgentJson.String(json["status"]) ?? "completed";
@@ -280,15 +289,36 @@ public sealed class OpenClickyAgentClient
     /// Full agent run on a (possibly resumed) Codex thread. The screenshot is attached as image
     /// context. <paramref name="onEvent"/> gets each progress line on a background thread.
     /// </summary>
-    public Task<OpenClickyAgentRunResult> RunAgentAsync(string task, string? screenshotPath, string? threadId,
-                                                        Action<string>? onEvent, CancellationToken cancellationToken = default) =>
-        ExecuteAsync(RunAgentArguments(task, screenshotPath, threadId), onEvent, cancellationToken);
+    public async Task<OpenClickyAgentRunResult> RunAgentAsync(string task, string? screenshotPath, string? threadId,
+                                                              Action<string>? onEvent, CancellationToken cancellationToken = default)
+    {
+        // A task on an own key doesn't touch the plan's limits.
+        var finishMeasuring = ProviderCapabilities.Current().HasOwnOpenAIKey ? null : PlanLimitStore.Shared.BeginCodexRequest();
+        try
+        {
+            return await ExecuteAsync(RunAgentArguments(task, screenshotPath, threadId), onEvent, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            finishMeasuring?.Invoke();
+        }
+    }
 
     /// <summary>Recent Codex threads (newest first) for the Agents tab.</summary>
     public async Task<IReadOnlyList<OpenClickyThreadSummary>> ListThreadsAsync(int limit = 30, CancellationToken cancellationToken = default)
     {
         var output = await CaptureStandardOutputAsync(["threads", "list", "--limit", limit.ToString(CultureInfo.InvariantCulture), "--json"], cancellationToken).ConfigureAwait(false);
         return OpenClickyThreadDetail.DecodeList(output);
+    }
+
+    /// <summary>Fetches Node if agent tasks are waiting for it (AgentTool).</summary>
+    public Task DownloadNodeIfNeededAsync() => AgentTool.DownloadNodeIfNeededAsync(processRunner);
+
+    /// <summary>Deletes threads untouched for this many days, and returns their ids.</summary>
+    public async Task<IReadOnlyList<string>> PruneThreadsAsync(int olderThanDays, CancellationToken cancellationToken = default)
+    {
+        var output = await CaptureStandardOutputAsync(["threads", "prune", "--older-than-days", olderThanDays.ToString(CultureInfo.InvariantCulture), "--json"], cancellationToken).ConfigureAwait(false);
+        return OpenClickyThreadDetail.DecodeDeleted(output);
     }
 
     /// <summary>Full turn history of one thread.</summary>
@@ -367,6 +397,23 @@ public sealed class OpenClickyAgentClient
         return result.StandardOutput;
     }
 
+    /// <summary>Counts the task against the plan that ran it, and notices when the plan has run out.</summary>
+    private static void ReportUsage(OpenClickyAgentRunResult result)
+    {
+        var onPlan = !ProviderCapabilities.Current().HasOwnOpenAIKey;
+        if (result.Usage is { } usage)
+        {
+            int Count(string key) => usage[key] is JsonValue value && value.TryGetValue<int>(out var count) ? count : 0;
+            PlanUsageLedger.Shared.Record(new PlanUsageSample(
+                DateTimeOffset.UtcNow, (onPlan ? AnswerSource.CodexPlan : AnswerSource.OpenAI).Id(), PlanUsageLane.Agent,
+                Count("inputTokens"), Count("cachedInputTokens"), Count("outputTokens")));
+        }
+        if (!onPlan) return;
+        _ = result.ErrorMessage is { } message && PlanLimitText.Matches(message)
+            ? PlanLimitStore.Shared.NoteLimitHitAsync(AnswerSource.CodexPlan)
+            : PlanLimitStore.Shared.RefreshCodexAsync();
+    }
+
     private async Task<OpenClickyAgentRunResult> ExecuteAsync(IReadOnlyList<string> arguments, Action<string>? onEvent, CancellationToken cancellationToken)
     {
         var (_, request) = Launch(arguments);
@@ -420,6 +467,7 @@ public sealed class OpenClickyAgentClient
 
                 lock (collectorLock) collector.Flush();
                 var result = collector.Result;
+                ReportUsage(result);
                 if (terminationStatus != 0 && result.ErrorMessage is null)
                 {
                     result.ErrorMessage = collector.LastStandardErrorLine ?? $"openclicky exited with status {terminationStatus}";

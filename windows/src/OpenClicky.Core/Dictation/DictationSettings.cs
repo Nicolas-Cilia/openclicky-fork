@@ -38,10 +38,8 @@ public enum DictationEngineChoice
     Offline,
     /// <summary>Sarvam's Saaras, with the user's own key (`sarvamKey` in shell.json).</summary>
     Sarvam,
-    /// <summary>The OpenClicky backend (an account or the user's own OpenAI key).</summary>
-    [RawValue("openclicky")] OpenClicky,
-    /// <summary>AssemblyAI streaming through a backend-minted token.</summary>
-    [RawValue("assemblyai")] AssemblyAI,
+    /// <summary>OpenAI, on the user's own key. The stored value is the old engine's, so a saved choice carries over.</summary>
+    [RawValue("openclicky")] OpenAI,
 }
 
 /// <summary>
@@ -62,12 +60,11 @@ public static class DictationEngineChoices
         DictationEngineChoice.Offline => "Windows speech",
         DictationEngineChoice.Parakeet => "Parakeet",
         DictationEngineChoice.Sarvam => "Sarvam",
-        DictationEngineChoice.OpenClicky => "OpenClicky",
-        _ => "AssemblyAI",
+        _ => "OpenAI",
     };
 
     /// <summary>
-    /// The engines that run on this PC's own recogniser, with no key, account or credits. Every rule
+    /// The engines that run on this PC's own recogniser, with no key or credits. Every rule
     /// the Mac draws from "an engine on this machine" reads this one property instead of naming the
     /// engines again: no model clean-up unless it was allowed by name, no failed take's audio kept
     /// for a retry (a local engine that failed has no key, credits or network to wait for).
@@ -90,8 +87,7 @@ public static class DictationEngineChoices
         DictationEngineChoice.Offline => "windows",
         DictationEngineChoice.Moonshine or DictationEngineChoice.Parakeet => "this pc",
         DictationEngineChoice.Sarvam => "sarvam",
-        DictationEngineChoice.OpenClicky => "openai",
-        _ => "assemblyai",
+        _ => "openai",
     };
 
     /// <summary>The engine's name in Settings → Dictation's "Who hears you".</summary>
@@ -101,8 +97,7 @@ public static class DictationEngineChoices
         DictationEngineChoice.Offline => "Windows speech recognition",
         DictationEngineChoice.Parakeet => "Parakeet, on this PC",
         DictationEngineChoice.Sarvam => "Sarvam",
-        DictationEngineChoice.OpenClicky => "OpenAI, via OpenClicky",
-        _ => "AssemblyAI, via OpenClicky",
+        _ => "OpenAI, on your key",
     };
 
     /// <summary>The title of the "how to dictate" row on the Your words page.</summary>
@@ -119,8 +114,7 @@ public static class DictationEngineChoices
         DictationEngineChoice.Offline => "May use Microsoft online",
         DictationEngineChoice.Moonshine or DictationEngineChoice.Parakeet => "Private · offline",
         DictationEngineChoice.Sarvam => "Audio goes to Sarvam",
-        DictationEngineChoice.OpenClicky => "Audio goes to OpenAI",
-        _ => "Audio goes to AssemblyAI",
+        _ => "Audio goes to OpenAI",
     };
 
     /// <summary>Where a take's audio goes, as one sentence for the Your words page.</summary>
@@ -129,8 +123,7 @@ public static class DictationEngineChoices
         DictationEngineChoice.Offline => "Windows speech recognition hears you. With Windows’ online speech recognition on, it may use Microsoft’s online speech service.",
         DictationEngineChoice.Moonshine or DictationEngineChoice.Parakeet => "Your voice stays on this PC.",
         DictationEngineChoice.Sarvam => "Audio goes to Sarvam with your key.",
-        DictationEngineChoice.OpenClicky => "Audio goes to OpenAI through the OpenClicky backend.",
-        _ => "Audio goes to AssemblyAI through the OpenClicky backend.",
+        _ => "Audio goes to OpenAI with your key.",
     };
 
     /// <summary>What the engine does and what it needs, under its name in Settings.</summary>
@@ -142,8 +135,7 @@ public static class DictationEngineChoices
             ? $"Far more accurate than Windows speech recognition, and nothing leaves this PC. English and 24 European languages. A {ParakeetFacts.DownloadSizeText} download."
             : $"NVIDIA’s open model, offline. English and 24 European languages. A {ParakeetFacts.DownloadSizeText} download.",
         DictationEngineChoice.Sarvam => "Saaras hears eleven Indian languages. Billed by Sarvam to your key.",
-        DictationEngineChoice.OpenClicky => "Needs an OpenClicky account or your own OpenAI key.",
-        _ => "Words appear as you speak. Needs the OpenClicky backend.",
+        _ => "Needs your own OpenAI key.",
     };
 
     /// <summary>The short note on the right of the engine in Settings while it can't be used yet.</summary>
@@ -153,8 +145,7 @@ public static class DictationEngineChoices
         DictationEngineChoice.Offline => "",
         DictationEngineChoice.Parakeet => "Not downloaded",
         DictationEngineChoice.Sarvam => "Needs a key",
-        DictationEngineChoice.OpenClicky => "Needs account",
-        _ => "Needs backend",
+        _ => "Needs a key",
     };
 
     /// <summary>The words the settings search finds the engine by, besides its title and detail.</summary>
@@ -169,8 +160,7 @@ public static class DictationEngineChoices
             DictationEngineChoice.Moonshine => [.. onDeviceKeywords, "moonshine", "built in", "bundled", "model", "english"],
             DictationEngineChoice.Parakeet => [.. onDeviceKeywords, "parakeet", "nvidia", "download", "model"],
             DictationEngineChoice.Sarvam => ["sarvam", "saaras", "key", "api key", "indian", "hindi"],
-            DictationEngineChoice.OpenClicky => [.. onDeviceKeywords, "openai", "openclicky", "account", "backend"],
-            _ => [.. onDeviceKeywords, "assemblyai", "streaming", "backend"],
+            _ => [.. onDeviceKeywords, "openai", "key"],
         };
         return [.. common, .. own];
     }
@@ -343,9 +333,7 @@ public sealed class DictationSettings : ObservableObject
 {
     private static readonly Lazy<DictationSettings> SharedInstance = new(() =>
     {
-        var settings = new DictationSettings(Preferences.Shared);
-        settings.FollowAccountProfile();
-        return settings;
+        return new DictationSettings(Preferences.Shared);
     });
 
     public static DictationSettings Shared => SharedInstance.Value;
@@ -486,7 +474,6 @@ public sealed class DictationSettings : ObservableObject
     }
 
     private bool polishOfflineTakes;
-    private bool isApplyingAccountDefault;
     /// <summary>
     /// The offline engine's promise is that nothing leaves the PC; sending its words to a model
     /// for polish is off until asked for by name.
@@ -496,39 +483,15 @@ public sealed class DictationSettings : ObservableObject
         get => polishOfflineTakes;
         set => Store(ref polishOfflineTakes, value, () =>
         {
-            if (!isApplyingAccountDefault) defaults.Set(Keys.PolishOfflineTakes, value);
+            defaults.Set(Keys.PolishOfflineTakes, value);
         }, nameof(PolishOfflineTakes));
     }
 
-    /// <summary>The settings toggle: the person's own choice, which the account default never overrides.</summary>
+    /// <summary>The settings toggle: the person's own choice.</summary>
     public void ChoosePolishOfflineTakes(bool isOn)
     {
         defaults.Set(Keys.PolishOfflineTakesChosen, true);
         PolishOfflineTakes = isOn;
-    }
-
-    /// <summary>
-    /// A free account's takes go to its model anyway, so until the person chooses, polish of takes
-    /// heard on this PC is on for accounts and off otherwise. The default is not stored, so it
-    /// follows the account as it changes.
-    /// </summary>
-    public void ApplyAccountPolishDefault(AccountKind kind)
-    {
-        if (defaults.GetBool(Keys.PolishOfflineTakesChosen)) return;
-        var wanted = kind == AccountKind.Account;
-        if (polishOfflineTakes == wanted) return;
-        isApplyingAccountDefault = true;
-        PolishOfflineTakes = wanted;
-        isApplyingAccountDefault = false;
-    }
-
-    /// <summary>Re-applies the default whenever credentials change or the backend's answer changes the account.</summary>
-    private void FollowAccountProfile()
-    {
-        ApplyAccountPolishDefault(AccountCapabilities.Current(preferences: defaults).Kind);
-        void Reapply() => ApplyAccountPolishDefault(AccountCapabilities.Current(preferences: defaults).Kind);
-        OpenClickyConfiguration.CredentialsChanged += Reapply;
-        AccountProfileStore.ProfileChanged += Reapply;
     }
 
     public DictationLanguage Language => DictationLanguage.Named(LanguageCode);
@@ -721,7 +684,7 @@ public sealed class DictationSettings : ObservableObject
     }
 
     private bool keepMemoryOnThisPC;
-    /// <summary>History and learned terms never leave this PC (no backend sync of either). Key: the Mac's.</summary>
+    /// <summary>History and learned terms never leave this PC (no sync of either). Key: the Mac's.</summary>
     public bool KeepMemoryOnThisPC
     {
         get => keepMemoryOnThisPC;

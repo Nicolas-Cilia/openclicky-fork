@@ -36,55 +36,52 @@ public class SpeechVoicesTests
     }
 
     [Fact]
-    public void AutomaticPrefersOwnKeysThenTheFreeVoiceThenOfflineVoices()
+    public void AutomaticPrefersOwnKeysThenOfflineVoices()
     {
-        static SpeechVoiceChoice Resolve(OpenClickyShellSettings shell, bool account = false, bool kokoro = false) =>
-            SpeechVoiceChoices.Resolve(shell, account, kokoro, "en");
+        static SpeechVoiceChoice Resolve(OpenClickyShellSettings shell, bool kokoro = false) =>
+            SpeechVoiceChoices.Resolve(shell, kokoro, "en");
         Assert.Equal(SpeechVoiceChoice.Mac, Resolve(Settings()));
         Assert.Equal(SpeechVoiceChoice.Kokoro, Resolve(Settings(), kokoro: true));
-        // The free voice comes before a downloaded Kokoro: an ElevenLabs grant pays for it now (#23).
-        Assert.Equal(SpeechVoiceChoice.Account, Resolve(Settings(), account: true, kokoro: true));
-        Assert.Equal(SpeechVoiceChoice.Account, Resolve(Settings(), account: true));
-        Assert.Equal(SpeechVoiceChoice.Sarvam, Resolve(Settings(s => s.SarvamKey = "s"), account: true));
+        Assert.Equal(SpeechVoiceChoice.Sarvam, Resolve(Settings(s => s.SarvamKey = "s")));
         Assert.Equal(SpeechVoiceChoice.Sarvam, Resolve(Settings(s => { s.GeminiApiKey = "g"; s.SarvamKey = "s"; })));
-        Assert.Equal(SpeechVoiceChoice.Gemini, Resolve(Settings(s => s.GeminiApiKey = "g"), account: true));
+        Assert.Equal(SpeechVoiceChoice.Gemini, Resolve(Settings(s => s.GeminiApiKey = "g")));
         Assert.Equal(SpeechVoiceChoice.ElevenLabs, Resolve(Settings(s => { s.ElevenLabsApiKey = "e"; s.SarvamKey = "s"; })));
         Assert.Equal(SpeechVoiceChoice.OpenAI, Resolve(Settings(s => { s.OpenaiApiKey = "o"; s.ElevenLabsApiKey = "e"; })));
         Assert.Equal(SpeechVoiceChoice.Polly, Resolve(Settings(s => s.AmazonPollyCredentials = "AKIA:secret")));
     }
 
     [Fact]
-    public void APickedVoiceThatCannotSpeakFallsBackToTheFreeVoiceThenThisPC()
+    public void APickedVoiceThatCannotSpeakFallsBackToThisPC()
     {
         var pickedGoogle = Settings(s => s.SpeechVoice = "google");
-        Assert.Equal(SpeechVoiceChoice.Account, SpeechVoiceChoices.Resolve(pickedGoogle, true, false, "en"));
-        Assert.Equal(SpeechVoiceChoice.Mac, SpeechVoiceChoices.Resolve(pickedGoogle, false, false, "en"));
+        Assert.Equal(SpeechVoiceChoice.Mac, SpeechVoiceChoices.Resolve(pickedGoogle, false, "en"));
         var pickedKokoro = Settings(s => s.SpeechVoice = "kokoro");
-        // Kokoro still downloading: the account's voice, not this PC's robotic one (2026-10-28).
-        Assert.Equal(SpeechVoiceChoice.Account, SpeechVoiceChoices.Resolve(pickedKokoro, true, false, "en"));
-        Assert.Equal(SpeechVoiceChoice.Mac, SpeechVoiceChoices.Resolve(pickedKokoro, false, false, "en"));
-        Assert.Equal(SpeechVoiceChoice.Kokoro, SpeechVoiceChoices.Resolve(pickedKokoro, false, true, "en"));
+        Assert.Equal(SpeechVoiceChoice.Mac, SpeechVoiceChoices.Resolve(pickedKokoro, false, "en"));
+        Assert.Equal(SpeechVoiceChoice.Kokoro, SpeechVoiceChoices.Resolve(pickedKokoro, true, "en"));
         // Kokoro doesn't speak Tamil; Sarvam does.
-        Assert.Equal(SpeechVoiceChoice.Mac, SpeechVoiceChoices.Resolve(pickedKokoro, false, true, "ta"));
+        Assert.Equal(SpeechVoiceChoice.Mac, SpeechVoiceChoices.Resolve(pickedKokoro, true, "ta"));
         var pickedSarvam = Settings(s => { s.SpeechVoice = "sarvam"; s.SarvamKey = "s"; });
-        Assert.Equal(SpeechVoiceChoice.Sarvam, SpeechVoiceChoices.Resolve(pickedSarvam, false, false, "ta"));
+        Assert.Equal(SpeechVoiceChoice.Sarvam, SpeechVoiceChoices.Resolve(pickedSarvam, false, "ta"));
     }
 
     [Fact]
     public void KokoroInALanguageItDoesntSpeakCarriesOnAsAutomatic()
     {
         var kokoro = Settings(s => s.SpeechVoice = "kokoro");
-        Assert.Equal(SpeechVoiceChoice.Account, SpeechVoiceChoices.Resolve(kokoro, true, true, "ta"));
+        Assert.Equal(SpeechVoiceChoice.Mac, SpeechVoiceChoices.Resolve(kokoro, true, "ta"));
+        // Automatic means own keys come first, so a key speaks instead of this PC.
+        var kokoroWithAKey = Settings(s => { s.SpeechVoice = "kokoro"; s.OpenaiApiKey = "o"; });
+        Assert.Equal(SpeechVoiceChoice.OpenAI, SpeechVoiceChoices.Resolve(kokoroWithAKey, true, "ta"));
     }
 
     [Fact]
     public void ThePickerOffersTheVoicesThereAreKeysForAndKeepsThePickedOne()
     {
-        var bare = SpeechVoiceChoices.Offered(Settings(), false, "en");
+        var bare = SpeechVoiceChoices.Offered(Settings(), "en");
         Assert.Equal([SpeechVoiceChoice.Automatic, SpeechVoiceChoice.Kokoro, SpeechVoiceChoice.Mac], bare);
-        var withKeys = SpeechVoiceChoices.Offered(Settings(s => { s.ElevenLabsApiKey = "e"; s.GoogleCloudApiKey = "g"; }), true, "en");
-        Assert.Equal([SpeechVoiceChoice.Automatic, SpeechVoiceChoice.Account, SpeechVoiceChoice.ElevenLabs, SpeechVoiceChoice.Google, SpeechVoiceChoice.Kokoro, SpeechVoiceChoice.Mac], withKeys);
-        var pickedWithoutKey = SpeechVoiceChoices.Offered(Settings(s => s.SpeechVoice = "polly"), false, "en");
+        var withKeys = SpeechVoiceChoices.Offered(Settings(s => { s.ElevenLabsApiKey = "e"; s.GoogleCloudApiKey = "g"; }), "en");
+        Assert.Equal([SpeechVoiceChoice.Automatic, SpeechVoiceChoice.ElevenLabs, SpeechVoiceChoice.Google, SpeechVoiceChoice.Kokoro, SpeechVoiceChoice.Mac], withKeys);
+        var pickedWithoutKey = SpeechVoiceChoices.Offered(Settings(s => s.SpeechVoice = "polly"), "en");
         Assert.Contains(SpeechVoiceChoice.Polly, pickedWithoutKey);
     }
 
@@ -143,10 +140,9 @@ public class SpeechVoicesTests
         Assert.Throws<CloudVoiceException>(() => CloudVoiceRequests.DecodeGoogleSpeech("{}"u8.ToArray()));
     }
 
-    /// <summary>The account's free voice (/tts, relayed to ElevenLabs) and an own ElevenLabs key ask for the
-    /// same model and settings, from one body builder.</summary>
+    /// <summary>What an own ElevenLabs key asks for: the model and its settings.</summary>
     [Fact]
-    public void TheFreeVoiceAndAnOwnElevenLabsKeySendTheSameBody()
+    public void AnOwnElevenLabsKeySendsTheExpectedBody()
     {
         var body = JsonNode.Parse(CloudVoiceRequests.ElevenLabsSpeechBody("hi"))!.AsObject();
         Assert.Equal("hi", (string?)body["text"]);
@@ -197,6 +193,6 @@ public class SpeechVoicesTests
     {
         var error = await Assert.ThrowsAsync<CloudVoiceException>(() =>
             CloudVoiceSpeaker.AudioAsync("hi", SpeechVoiceChoice.ElevenLabs, Settings(), "en"));
-        Assert.Equal("ElevenLabs needs a key under Settings → Keys & Account.", error.Message);
+        Assert.Equal("ElevenLabs needs a key under Settings → Keys & Plans.", error.Message);
     }
 }

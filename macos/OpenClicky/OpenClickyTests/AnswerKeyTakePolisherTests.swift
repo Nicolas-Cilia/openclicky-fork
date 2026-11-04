@@ -10,19 +10,19 @@ import Testing
 
 struct AnswerKeyTakePolisherTests {
     @Test func aGeminiKeyAlonePolishes() {
-        let credentials = ProviderCredentials(openAIKey: nil, anthropicKey: nil, accountToken: nil, geminiKey: "g")
+        let credentials = ProviderCredentials(openAIKey: nil, anthropicKey: nil, geminiKey: "g")
         #expect(AnswerKeyTakePolisher.firstAvailable(credentials: credentials)?.source == .gemini)
     }
 
     @Test func groqIsTriedFirstBecauseItIsQuickest() {
-        let credentials = ProviderCredentials(openAIKey: nil, anthropicKey: nil, accountToken: nil,
+        let credentials = ProviderCredentials(openAIKey: nil, anthropicKey: nil,
                                               openRouterKey: "o", geminiKey: "g", groqKey: "q", mistralKey: "m", xaiKey: "x")
         #expect(AnswerKeyTakePolisher.firstAvailable(credentials: credentials)?.source == .groq)
     }
 
     @Test func everyKeyedAnswerSourceButTheBigTwoCanPolish() {
         for source in [AnswerSource.openRouter, .gemini, .groq, .mistral, .xai] {
-            var credentials = ProviderCredentials(openAIKey: nil, anthropicKey: nil, accountToken: nil)
+            var credentials = ProviderCredentials(openAIKey: nil, anthropicKey: nil)
             switch source {
             case .openRouter: credentials.openRouterKey = "k"
             case .gemini: credentials.geminiKey = "k"
@@ -35,7 +35,7 @@ struct AnswerKeyTakePolisherTests {
     }
 
     @Test func noKeysNoPolisher() {
-        #expect(AnswerKeyTakePolisher.firstAvailable(credentials: ProviderCredentials(openAIKey: nil, anthropicKey: nil, accountToken: nil)) == nil)
+        #expect(AnswerKeyTakePolisher.firstAvailable(credentials: ProviderCredentials(openAIKey: nil, anthropicKey: nil)) == nil)
     }
 
     @Test func slowAnswerModelsGetAQuickOneForTidying() {

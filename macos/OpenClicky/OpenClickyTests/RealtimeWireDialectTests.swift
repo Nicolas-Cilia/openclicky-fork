@@ -26,21 +26,20 @@ struct RealtimeWireDialectTests {
 
     private func types(_ events: [[String: Any]]) -> [String] { events.compactMap { $0["type"] as? String } }
 
-    @Test func choosesOpenAIFirstThenGeminiThenTheAccount() {
-        let both = ProviderCredentials(openAIKey: "sk", anthropicKey: nil, accountToken: nil, geminiKey: "g")
+    @Test func choosesOpenAIFirstThenGemini() {
+        let both = ProviderCredentials(openAIKey: "sk", anthropicKey: nil, geminiKey: "g")
         #expect(RealtimeVoiceProvider.choose(credentials: both, preferred: nil) == .openAI)
         #expect(RealtimeVoiceProvider.choose(credentials: both, preferred: .gemini) == .gemini)
-        let geminiOnly = ProviderCredentials(openAIKey: nil, anthropicKey: nil, accountToken: nil, geminiKey: "g")
+        let geminiOnly = ProviderCredentials(openAIKey: nil, anthropicKey: nil, geminiKey: "g")
         #expect(RealtimeVoiceProvider.choose(credentials: geminiOnly, preferred: .openAI) == .gemini)
-        let account = ProviderCredentials(openAIKey: nil, anthropicKey: nil, accountToken: "t")
-        #expect(RealtimeVoiceProvider.choose(credentials: account, preferred: .gemini) == .openAI)
-        #expect(RealtimeVoiceProvider.choose(credentials: ProviderCredentials(openAIKey: nil, anthropicKey: nil, accountToken: nil), preferred: nil) == nil)
+        #expect(RealtimeVoiceProvider.choose(credentials: ProviderCredentials(openAIKey: nil, anthropicKey: nil), preferred: nil) == nil)
     }
 
     @Test func aGeminiKeyAloneTurnsOnRealtime() {
-        let capabilities = AccountCapabilities(kind: .signedOut, ownRealtimeKey: true)
-        #expect(capabilities.usesRealtime)
-        #expect(!AccountCapabilities(kind: .signedOut).usesRealtime)
+        var geminiKey = OpenClickyShellSettings()
+        geminiKey.geminiApiKey = "g"
+        #expect(ProviderCapabilities.current(settings: geminiKey, codexSignedIn: { false }).usesRealtime)
+        #expect(!ProviderCapabilities.current(settings: OpenClickyShellSettings(), codexSignedIn: { false }).usesRealtime)
     }
 
     @Test func setupCarriesInstructionsToolsAndManualTurns() throws {

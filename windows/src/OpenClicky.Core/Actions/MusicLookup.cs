@@ -3,8 +3,7 @@
 //
 // "Play Blinding Lights" in Spotify's desktop app. Spotify plays a track by URI but offers no search
 // of its own, so the song is looked up first: on the person's own Spotify client credentials
-// straight to Spotify, else through the OpenClicky backend's catalogue search (the words only), and
-// when neither answers, Spotify's own search page opens for them to pick.
+// straight to Spotify, and without them Spotify's own search page opens for them to pick.
 
 using System.Globalization;
 using System.Net.Http.Headers;
@@ -30,22 +29,19 @@ public abstract record MusicLookupRoute
     private MusicLookupRoute() { }
 
     public sealed record Spotify(string ClientId, string ClientSecret) : MusicLookupRoute;
-    public sealed record Backend(Uri BaseUrl) : MusicLookupRoute;
     public sealed record None : MusicLookupRoute;
 
-    /// <summary>Own credentials ("clientId:clientSecret" in shell.json) first; else the backend.</summary>
-    public static MusicLookupRoute For(string? credentials, Uri? backendUrl)
+    /// <summary>Own credentials ("clientId:clientSecret" in shell.json), else no lookup.</summary>
+    public static MusicLookupRoute For(string? credentials)
     {
         var parts = (credentials ?? "").Trim().Split(':', 2);
         if (parts.Length == 2 && parts[0].Length > 0 && parts[1].Length > 0) return new Spotify(parts[0], parts[1]);
-        if (backendUrl is not null) return new Backend(backendUrl);
         return new None();
     }
 
     public string LogName => this switch
     {
         Spotify => "spotify",
-        Backend => "backend",
         _ => "none",
     };
 }
@@ -100,8 +96,7 @@ public sealed class MusicLookup(MusicLookupRoute route, HttpClient? client = nul
 
     /// <summary>The route the app's settings give now.</summary>
     public static MusicLookupRoute CurrentRoute() =>
-        MusicLookupRoute.For(OpenClickyConfiguration.Settings.SpotifyCredentials,
-                             Uri.TryCreate(OpenClickyConfiguration.BackendBaseUrl, UriKind.Absolute, out var backend) ? backend : null);
+        MusicLookupRoute.For(OpenClickyConfiguration.Settings.SpotifyCredentials);
 
     public async Task<IReadOnlyList<MusicTrack>> SearchAsync(string query, CancellationToken cancellationToken = default)
     {
@@ -117,11 +112,6 @@ public sealed class MusicLookup(MusicLookupRoute route, HttpClient? client = nul
                     using var request = new HttpRequestMessage(HttpMethod.Get, url);
                     request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                     return DecodeSpotifyResults(await ReadAsync(request, cancellationToken).ConfigureAwait(false));
-                }
-                case MusicLookupRoute.Backend backend:
-                {
-                    using var request = new HttpRequestMessage(HttpMethod.Get, $"{backend.BaseUrl.AbsoluteUri.TrimEnd('/')}/music/search?q={Uri.EscapeDataString(query)}");
-                    return DecodeBackendResults(await ReadAsync(request, cancellationToken).ConfigureAwait(false));
                 }
                 default:
                     return [];
@@ -163,16 +153,6 @@ public sealed class MusicLookup(MusicLookupRoute route, HttpClient? client = nul
         return body;
     }
 
-    /// <summary>The backend's <c>{tracks:[{uri,name,artists:[String],…}]}</c>.</summary>
-    public static IReadOnlyList<MusicTrack> DecodeBackendResults(string json)
-    {
-        var tracks = (JsonNode.Parse(json) as JsonObject)?["tracks"] as JsonArray ?? throw new JsonException("no tracks");
-        return tracks.OfType<JsonObject>().Select(track => new MusicTrack(
-            track["uri"]?.GetValue<string>() ?? throw new JsonException("no uri"),
-            track["name"]?.GetValue<string>() ?? "",
-            (track["artists"] as JsonArray)?.Select(artist => artist?.GetValue<string>() ?? "").ToList() ?? [])).ToList();
-    }
-
     /// <summary>Spotify's own <c>{tracks:{items:[{uri,name,artists:[{name}],…}]}}</c>.</summary>
     public static IReadOnlyList<MusicTrack> DecodeSpotifyResults(string json)
     {
@@ -183,10 +163,10 @@ public sealed class MusicLookup(MusicLookupRoute route, HttpClient? client = nul
             (track["artists"] as JsonArray)?.OfType<JsonObject>().Select(artist => artist["name"]?.GetValue<string>() ?? "").ToList() ?? [])).ToList();
     }
 
-    /// <summary>Keys &amp; Plans' Test for own Spotify credentials: one song looked up on them alone (never the backend).</summary>
+    /// <summary>Keys &amp; Plans' Test for own Spotify credentials: one song looked up on them alone).</summary>
     public static async Task<string> TestCredentialsAsync(string? credentials, HttpClient? client = null)
     {
-        if (MusicLookupRoute.For(credentials, backendUrl: null) is not MusicLookupRoute.Spotify route)
+        if (MusicLookupRoute.For(credentials) is not MusicLookupRoute.Spotify route)
         {
             return "✗ Paste client id:client secret from developer.spotify.com.";
         }

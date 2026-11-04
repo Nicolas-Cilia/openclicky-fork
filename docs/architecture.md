@@ -1,52 +1,34 @@
 # How OpenClicky works
 
-The pieces, how a request travels through them, where the skills live, and how upstream HeyClicky
-releases are followed.
+The pieces, how a request travels through them, and where the skills live.
 
 ## Architecture
 
 ```
-  macos/OpenClickyShell (menu bar + ⌥Space panel)      openclicky voice   openclicky do "…"
-        │ runs the CLI as a subprocess                       │ ffmpeg mic → /agent/transcribe
-        ▼                                                    ▼                  │ gate: /v1/messages
-  agent/  ──── ask lane: POST /v1/chat/completions ──────────────────────────▶  │   {"lane":"ask"|"agent"}
-        │                                                                       ▼
-        │ agent lane: spawn `codex app-server --stdio`, CODEX_HOME=~/.openclicky/codex-home
-        │ initialize → thread/start | thread/resume → turn/start → (approvals) → turn/completed
-        ▼
-  Codex CLI ──── POST /v1/responses ──▶ backend/ (Hono) ── holds OPENAI_API_KEY ──▶ OpenAI
-   model_provider = "openclicky"        │  requireAuth: Supabase JWT or session token
-   env_key = OPENCLICKY_SESSION_TOKEN   │  POST /agent/session-token   JWT → session token
-   model_instructions_file =           │  POST /v1/messages           ──▶ Anthropic (gate)
-     skills/ModelInstructions.md       │  POST /agent/realtime/session ──▶ OpenAI Realtime secret
-   [[skills.config]] path = skills/    │  POST /agent/transcribe       ──▶ OpenAI speech-to-text
-   [mcp_servers.composio|computer-use] │  GET  /skills/library
-                                       ▼
-                                    Supabase Auth (your project)
+  Mac or Windows app
+    ├─ answers: claude -p or codex exec on your plan, or an API key straight to its vendor
+    │    ProviderRouter picks the default; the backup plan takes over at a limit
+    ├─ usage: ~/.openclicky/usage.jsonl (counts only) + the plans' limits as the CLIs report them
+    └─ agent tasks: the openclicky CLI (agent/)
+         └─ codex app-server, CODEX_HOME=~/.openclicky/codex-home
+              ├─ on your ChatGPT sign-in, linked from ~/.codex/auth.json
+              └─ or an own OpenAI key (OPENCLICKY_OPENAI_KEY)
 ```
 
-Keys never leave the backend. The agent process strips `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` from
-Codex's environment and only ever presents the user's token; the shell does the same for the CLI.
+There is no server of our own. Keys in `~/.openclicky/shell.json` go only to their own vendor.
 
 ### Repository layout
 
 | Path | What |
 |---|---|
-| `agent/src/codex.ts` | Codex bridge: spawn, JSON-RPC, threads, turns, streaming deltas, approvals, artifacts |
-| `agent/src/cli.ts` | `openclicky run|ask|do|voice|talk|threads|skills|token` |
-| `agent/src/gate.ts`, `ask.ts`, `audio.ts`, `screenshot.ts` | gate lane, ask lane, ffmpeg capture + STT, `screencapture` |
-| `agent/src/codexHome.ts`, `config/codex-config.toml` | renders the isolated `CODEX_HOME/config.toml` (provider, skills, user skills, MCP servers) |
-| `agent/src/skillsLibrary.ts`, `skillMarkdown.ts` | the user skill library on disk (`~/.openclicky/skills`): list, activate, sync `active/` symlinks; SKILL.md frontmatter parser |
-| `backend/src/app.ts`, `auth.ts`, `proxy.ts` | routes, Supabase/session auth, streaming proxies, Realtime secret, STT |
-| `backend/scripts/` | `mint-dev-jwt.mjs` (local auth), `build-skills-manifest.mjs` (`skills/` + `app-skills/` → `src/skillsManifest.ts`) |
-| `app-skills/` | 17 app-teaching skills (Finder, Safari, Chrome, Xcode, VS Code, Terminal, Figma, Slack, Mail, Notes, Preview, System Settings, Gmail, Google Docs, GitHub, YouTube, DaVinci Resolve), copied into the app at build time; see its README |
-| `docs/skills.md` | skill authoring guide (format, matching, budgets, activation) |
-| `scripts/upstream-watch.mjs`, `reference/upstream/` | HeyClicky release watcher and its recorded versions / changelog mirror |
-| `.github/workflows/upstream-watch.yml` | daily run of the watcher; opens an `upstream` issue per new HeyClicky version |
-| `skills/` | `ModelInstructions.md` + 15 skills; regenerate with `npm run port-skills` |
-| `macos/OpenClicky/` | primary native shell, renamed fork of the original open-source Clicky app + OpenClicky integration (`OPENCLICKY.md`); `SkillLibraryStore`, `AppSkillMatcher`, `SkillPromptBuilder`, `FrontmostAppObserver` are the skills side |
-| `macos/OpenClickyShell/` | minimal SwiftPM menu-bar panel used as a headless smoke harness |
-| `reference/`, `docs/superpowers/plans/` | reverse-engineering notes and the plans for each cut |
+| `agent/src/codex.ts` | Codex bridge: spawn, JSON-RPC, threads, turns, streaming deltas, approvals, artifacts, token counts |
+| `agent/src/cli.ts` | `openclicky run\|ask\|do\|voice\|talk\|threads\|skills` |
+| `agent/src/codexHome.ts`, `config/codex-config.toml` | renders the isolated `CODEX_HOME`: provider, sign-in link, skills, MCP servers |
+| `agent/src/skillsLibrary.ts`, `skillMarkdown.ts` | the user skill library in `~/.openclicky/skills` |
+| `app-skills/` | app-teaching skills, copied into the app at build time |
+| `skills/` | `ModelInstructions.md` and the built-in agent skills |
+| `macos/OpenClicky/` | the Mac app. `ProviderRoute.swift` picks who answers; `PlanUsage.swift` holds usage, limits and failover state; `NotchOccupancy.swift` shares the notch |
+| `windows/` | the Windows app |
 
 ## Skills
 
@@ -67,48 +49,24 @@ a folder into `library/` by hand. Every agent run re-syncs `active/` so Codex se
 Skills are not drafted in the app: shared ones arrive as reviewed pull requests to `app-skills/`.
 Matching rules: bundle id exact; a site matches
 the browser host or any of its subdomains; a site skill beats the browser's own app skill; the most
-specific site wins. Add an app skill by creating the folder and running `npm run build` (the
-backend manifest, `GET /skills/library`, lists it with `kind: "app"`); the app picks it up on the
-next voice turn.
+specific site wins. Add an app skill by creating the folder; the app picks it up on the next voice turn.
 
 Not ported from HeyClicky: the community approval queue with email, "My Skills" filter, and
 team-private sharing (v1.0.34–36, v1.0.44).
 
 ### The behavior contract
 
-`skills/ModelInstructions.md` is the ported HeyClicky agent contract (routing ladder, approval gate,
+`skills/ModelInstructions.md` is the agent contract (routing ladder, approval gate,
 style, macOS permission-prompt-storm avoidance), rebranded. Codex loads it via
-`model_instructions_file`; the 15 skills are exposed through `[[skills.config]]` and served by
-`GET /skills/library`. Regenerate from `reference/` with `npm run port-skills`. See `skills/ATTRIBUTION.md`.
+`model_instructions_file`; the 15 skills are exposed through `[[skills.config]]` . Regenerate from `reference/` with `npm run port-skills`. See `skills/ATTRIBUTION.md`.
 
-## Upstream: following HeyClicky
+## Plans, limits and failover
 
-heyclicky.com has no RSS feed, but two machine-readable sources exist: the Sparkle appcast at
-`farzaa.github.io/clicky-releases/appcast.xml` (version, build, date, DMG) and the changelog page.
-`scripts/upstream-watch.mjs` fetches both, compares them with `reference/upstream/heyclicky-versions.json`,
-and prints what is new.
+`ProviderCredentials.activeAnswerSource` decides who answers: the person's default, or the backup while the
+default has run out. `ClaudeAPI.answerThroughProvider` retries a refused question on the backup once, if
+nothing has been spoken yet. `PlanAvailability` remembers how long a plan is out (its reset time, else 30
+minutes). Only plans can be backups.
 
-```bash
-node scripts/upstream-watch.mjs            # list versions not yet recorded
-npm run upstream:check                     # …and record them (state JSON + reference/upstream/heyclicky-changelog.md)
-node scripts/upstream-watch.mjs --issues   # …and open one GitHub issue per new version (needs gh + GH_TOKEN)
-```
-
-`.github/workflows/upstream-watch.yml` runs the `--issues` form daily (and on demand): each new
-HeyClicky version becomes an issue labelled `upstream` with the changelog entry, the DMG link, and a
-port checklist, and the updated state files are committed back. State is written before any issue
-is opened and the issue URL is stored per version, so a failed `gh` call is retried next run and
-never duplicated; the exit code is non-zero only when a fetch fails. `reference/upstream/heyclicky-changelog.md`
-is a full mirror of the changelog (v1.0 → v1.0.48 at the time of writing), newest first.
-
-For email notifications without CI: on github.com/farzaa/clicky-releases choose Watch → Custom →
-Releases.
-
-## Reference material
-
-The master spec recovered from HeyClicky v1.0.48 lived in `REVERSE-ENGINEERING.md`, removed on
-2026-09-13 once the cuts it described had shipped (it is in git history); `reference/` holds
-the verbatim model instructions, the original Codex config, the bundled skills, and license notes.
-Hermes skills are MIT (Nous Research); the `powerpoint` skill is proprietary and is not copied;
-cua-driver is third-party — check its license before bundling.
-
+Neither plan gives a per-request cost. `claude -p` reports tokens, a list-price estimate, and the 5-hour and
+7-day limits on every request; `codex exec` reports tokens, and `codex app-server`'s
+`account/rateLimits/read` reports its limits and any purchased credits.

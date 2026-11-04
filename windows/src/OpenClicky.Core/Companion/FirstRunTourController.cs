@@ -6,8 +6,8 @@
 //  flies out of the island to the mouse and introduces itself; then one card at a time shows the
 //  keys for each thing OpenClicky does (dictate, ask, hand over a task) and moves on only when it
 //  has seen that thing work: a take with words, a spoken answer, an agent task or quick action.
-//  A PC with no key and no account gets a guest account on OpenClicky's credits; only at the end
-//  may the person add an email, or skip it. The step is kept in the preferences.
+//  Dictation works with nothing set up; asking and tasks point at connecting Claude or Codex in
+//  Settings → Keys & Plans when nothing can answer yet. The step is kept in the preferences.
 //
 //  Windows has no speech-recognition permission and no fn key to free, so the Mac's "allow" and
 //  "free fn" cards are gone. The cards' words are FirstRunTourCards (IslandCards.cs).
@@ -41,8 +41,6 @@ public sealed class FirstRunTourController
     private bool statusIsGood;
     private bool offersMicrophoneChange;
     private bool isShowingDemo;
-    /// <summary>The step "add email" left from, to come back to once the email gave the PC an account.</summary>
-    private FirstRunTourStep? stepAfterAccount;
     private CompanionVoiceState previousVoiceState = CompanionVoiceState.Idle;
     private bool isObserving;
     private CancellationTokenSource? advanceCancellation;
@@ -63,8 +61,6 @@ public sealed class FirstRunTourController
 
     public FirstRunTourStep? Step => step;
 
-    /// <summary>What is typed in the account step's field.</summary>
-    public string FieldText { get; set; } = "";
 
     /// <summary>The tour has been completed (or skipped, or predates this PC's first run).</summary>
     public bool IsFinished => preferences.GetBool(DoneKey);
@@ -149,12 +145,6 @@ public sealed class FirstRunTourController
                 companion.Services.MainThread.Post(Publish);
             }
         };
-        OpenClickyAuthSession.Shared.PropertyChanged += (_, eventArgs) =>
-        {
-            if (eventArgs.PropertyName == nameof(OpenClickyAuthSession.EmailFlow)) companion.Services.MainThread.Post(() => EmailFlowChanged(OpenClickyAuthSession.Shared.EmailFlow));
-        };
-        // Whether new accounts are taken decides if the account step is offered at all.
-        _ = OpenClickyAuthSession.Shared.RefreshAccountsOpenAsync();
     }
 
     private void TakeFinished(TakeRecord take)
@@ -231,50 +221,11 @@ public sealed class FirstRunTourController
         previousVoiceState = voiceState;
     }
 
-    private void EmailFlowChanged(OpenClickyAuthSession.EmailFlowState flow)
-    {
-        if (step != FirstRunTourStep.Account) return;
-        switch (flow)
-        {
-            case OpenClickyAuthSession.EmailFlowState.SignedInState:
-                FieldText = "";
-                companion.Island.TourFieldText = "";
-                Succeed("✓ saved. there’s a code in your inbox to confirm it whenever you like.");
-                break;
-            case OpenClickyAuthSession.EmailFlowState.NeedsCodeState needsCode:
-                FieldText = "";
-                companion.Island.TourFieldText = "";
-                status = $"that email has an account. type the 6-digit code i sent to {needsCode.Email}.";
-                statusIsGood = false;
-                Publish();
-                FocusField();
-                break;
-            case OpenClickyAuthSession.EmailFlowState.SendingState:
-            case OpenClickyAuthSession.EmailFlowState.CheckingCodeState:
-                status = "one moment…";
-                statusIsGood = false;
-                Publish();
-                break;
-            case OpenClickyAuthSession.EmailFlowState.FailedState failed:
-                status = failed.Message;
-                statusIsGood = false;
-                Publish();
-                break;
-        }
-    }
-
     private void TaskStarted()
     {
         if (step != FirstRunTourStep.Act) return;
         Succeed("✓ on it. results show up in the island.", RecordedVoice.Line.TourActDone);
     }
-
-    /// <summary>The tour's last note before "all set", on a free account: questions are answered on OpenClicky's credits.</summary>
-    private static bool NeedsFreeAccountNote =>
-        ProviderRouter.Route(ProviderCapability.Claude, ProviderRouter.CurrentCredentials()).Kind == ProviderRouteKind.Backend;
-
-    /// <summary>No key and no account (the guest start did not work): the account card asks for an email.</summary>
-    private static bool AccountCardAsksForEmail => !OpenClickyConfiguration.IsConfigured;
 
     /// <summary>Runs <paramref name="action"/> once the mouse has stayed put for 2 s, starting <paramref name="delay"/> from now.</summary>
     private void WatchForIdleMouse(TimeSpan delay, Action action)
@@ -304,14 +255,6 @@ public sealed class FirstRunTourController
             action();
             return;
         }
-    }
-
-    private void FocusField() => _ = FocusFieldSoonAsync();
-
-    private async Task FocusFieldSoonAsync()
-    {
-        await Task.Delay(TimeSpan.FromSeconds(0.2));
-        companion.Island.FocusTourField();
     }
 
     // MARK: - Moving through the steps
@@ -350,16 +293,18 @@ public sealed class FirstRunTourController
             case FirstRunTourStep.Meet: GoTo(FirstRunTourStep.Dictate); break;
             case FirstRunTourStep.Dictate: GoTo(FirstRunTourStep.Talk); break;
             case FirstRunTourStep.Talk: GoTo(FirstRunTourStep.Act); break;
-            case FirstRunTourStep.Act: GoTo(NeedsFreeAccountNote ? FirstRunTourStep.Account : FirstRunTourStep.Done); break;
-            case FirstRunTourStep.Account:
-                var next = stepAfterAccount ?? FirstRunTourStep.Done;
-                stepAfterAccount = null;
-                GoTo(next);
+            case FirstRunTourStep.Act:
+                GoTo(OffersNaturalVoice(KokoroVoice.IsInstalled, SpeechVoiceChoices.Current(), KokoroVoice.SpeakerFor(ReplyLanguage.CurrentCode, null) is not null)
+                    ? FirstRunTourStep.Voice : FirstRunTourStep.Done);
                 break;
-            case FirstRunTourStep.OpenAtLogin: CloseOpenAtLoginOffer(); break;
+            case FirstRunTourStep.Voice: GoTo(FirstRunTourStep.Done); break;
             default: Finish(); break;
         }
     }
+
+    /// <summary>Offered once, near the end of the tour: only to someone still on this PC's own voice, and nothing downloads until they say yes.</summary>
+    public static bool OffersNaturalVoice(bool kokoroInstalled, SpeechVoiceChoice speakingVoice, bool kokoroSpeaksLanguage) =>
+        !kokoroInstalled && speakingVoice == SpeechVoiceChoice.Mac && kokoroSpeaksLanguage;
 
     private void GoTo(FirstRunTourStep newStep)
     {
@@ -384,8 +329,6 @@ public sealed class FirstRunTourController
                 {
                     if (step == FirstRunTourStep.Meet) companion.PointAtTourPrimaryButton("tap let’s go");
                 });
-                // Nothing to type to get going: a PC with no key and no account starts as a guest.
-                if (!OpenClickyConfiguration.IsConfigured) _ = StartGuestAsync();
                 break;
             case FirstRunTourStep.Dictate:
                 companion.RecordedVoice.Play(RecordedVoice.Line.TourDictate);
@@ -407,30 +350,11 @@ public sealed class FirstRunTourController
             case FirstRunTourStep.Act:
                 if (OpenClickyConfiguration.IsConfigured) companion.RecordedVoice.Play(RecordedVoice.Line.TourAct);
                 break;
-            case FirstRunTourStep.Account:
-                FieldText = "";
-                companion.Island.TourFieldText = "";
-                if (AccountCardAsksForEmail)
-                {
-                    OpenClickyAuthSession.Shared.ForgetSettledFlow();
-                    FocusField();
-                }
-                else
-                {
-                    companion.RecordedVoice.Play(RecordedVoice.Line.TourAccount);
-                }
-                break;
             case FirstRunTourStep.Done:
                 companion.RecordedVoice.Play(RecordedVoice.Line.TourDone);
                 break;
         }
         Publish();
-    }
-
-    private async Task StartGuestAsync()
-    {
-        await OpenClickyAuthSession.Shared.StartGuestWithoutEmailAsync();
-        companion.Services.MainThread.Post(Publish);
     }
 
     // MARK: - Open at sign-in
@@ -497,18 +421,6 @@ public sealed class FirstRunTourController
                 break;
             case FirstRunTourStep.Dictate:
                 break;
-            case FirstRunTourStep.Account:
-                if (AccountCardAsksForEmail)
-                {
-                    SubmitField();
-                }
-                else
-                {
-                    // "add my key": Settings → Keys & Account has the key fields; the tour carries on.
-                    companion.ShowSettings(DictationSettingsPage.Account);
-                    Advance();
-                }
-                break;
             case FirstRunTourStep.Talk:
             case FirstRunTourStep.Act:
                 // Tried it (or would rather not): "next" moves on, as the success would.
@@ -517,15 +429,14 @@ public sealed class FirstRunTourController
                     Advance();
                     return;
                 }
-                if (OpenClickyAuthSession.Shared.AccountsOpen != false)
-                {
-                    stepAfterAccount = currentStep;
-                    GoTo(FirstRunTourStep.Account);
-                }
-                else
-                {
-                    companion.ShowSettings(DictationSettingsPage.Account);
-                }
+                // Nothing set up to answer: "connect" opens the page where Claude or Codex is switched on.
+                companion.ShowSettings(DictationSettingsPage.Keys);
+                break;
+            case FirstRunTourStep.Voice:
+                // Kokoro speaks once it has arrived; this PC's voice carries on until then.
+                OpenClickyConfiguration.Update(settings => settings.SpeechVoice = SpeechVoiceChoice.Kokoro.StoredValue());
+                KokoroVoice.Shared?.Download();
+                Advance();
                 break;
             case FirstRunTourStep.Done:
                 companion.ShowSettings(DictationSettingsPage.General);
@@ -556,33 +467,6 @@ public sealed class FirstRunTourController
             default:
                 Advance();
                 break;
-        }
-    }
-
-    /// <summary>The account step's field: an email starts a free account (or asks for a code); a code finishes signing in.</summary>
-    public void SubmitField()
-    {
-        var auth = OpenClickyAuthSession.Shared;
-        var typed = FieldText.Trim();
-        if (auth.EmailFlow is OpenClickyAuthSession.EmailFlowState.NeedsCodeState)
-        {
-            if (!EmailAccountFormRules.CanSubmitCode(typed))
-            {
-                status = "the code is the 6 digits in the email.";
-                Publish();
-                return;
-            }
-            _ = auth.SubmitCodeAsync(typed);
-        }
-        else
-        {
-            if (!EmailAccountFormRules.CanSubmitEmail(typed))
-            {
-                status = "that doesn’t look like an email yet.";
-                Publish();
-                return;
-            }
-            _ = auth.StartAsync(typed);
         }
     }
 
@@ -635,14 +519,11 @@ public sealed class FirstRunTourController
 
     private FirstRunTourCard MakeCard(FirstRunTourStep currentStep)
     {
-        var needsCode = OpenClickyAuthSession.Shared.EmailFlow is OpenClickyAuthSession.EmailFlowState.NeedsCodeState;
         var inputs = new FirstRunTourCardInputs(
             companion.DictationSettings.DictationKey,
             CanAsk: OpenClickyConfiguration.IsConfigured,
-            UsesAgent: AccountCapabilities.Current().UsesAgent,
+            UsesAgent: ProviderCapabilities.Current().UsesAgent,
             IsShowingDemo: isShowingDemo,
-            AccountCardAsksForEmail: AccountCardAsksForEmail,
-            NeedsCode: needsCode,
             Status: status,
             StatusIsGood: statusIsGood,
             MicrophoneName: currentStep == FirstRunTourStep.Dictate ? companion.MicrophoneName() : null,
@@ -656,7 +537,7 @@ public sealed class FirstRunTourController
         FirstRunTourStep.Dictate => "dictate",
         FirstRunTourStep.Talk => "talk",
         FirstRunTourStep.Act => "act",
-        FirstRunTourStep.Account => "account",
+        FirstRunTourStep.Voice => "voice",
         FirstRunTourStep.Done => "done",
         _ => "openAtLogin",
     };
@@ -667,7 +548,7 @@ public sealed class FirstRunTourController
         "dictate" => FirstRunTourStep.Dictate,
         "talk" => FirstRunTourStep.Talk,
         "act" => FirstRunTourStep.Act,
-        "account" => FirstRunTourStep.Account,
+        "voice" => FirstRunTourStep.Voice,
         "done" => FirstRunTourStep.Done,
         "openAtLogin" => FirstRunTourStep.OpenAtLogin,
         _ => null,

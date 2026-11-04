@@ -97,14 +97,14 @@ public class RealtimeConnectionRuleTests
     }
 
     [Fact]
-    public void ABackendRefusalUsesTheBackendsOwnWords()
+    public void ARefusalUsesOpenAIsOwnWords()
     {
-        var description = RealtimeVoiceClient.BackendRefusalDescription(401, """{"error":"invalid OpenAI key"}"""u8.ToArray());
+        var description = RealtimeVoiceClient.SecretRefusalDescription(401, """{"error":"invalid OpenAI key"}"""u8.ToArray());
         Assert.Contains("invalid OpenAI key", description);
         Assert.Contains("401", description);
         Assert.DoesNotContain("{", description);
-        Assert.Contains("quota exceeded", RealtimeVoiceClient.BackendRefusalDescription(500, """{"error":{"message":"quota exceeded"}}"""u8.ToArray()));
-        Assert.Equal("no client secret", RealtimeVoiceClient.BackendRefusalDescription(0, []));
+        Assert.Contains("quota exceeded", RealtimeVoiceClient.SecretRefusalDescription(500, """{"error":{"message":"quota exceeded"}}"""u8.ToArray()));
+        Assert.Equal("no client secret", RealtimeVoiceClient.SecretRefusalDescription(0, []));
     }
 
     [Fact]

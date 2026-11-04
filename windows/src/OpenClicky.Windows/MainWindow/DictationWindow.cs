@@ -1,5 +1,5 @@
 // Ports the window half of Dictation/UI/DictationWindow.swift: OpenClicky's one window. A Fluent
-// NavigationView lists six pages — Dictation, Clicky, Island, Keys & Account, Privacy, General — with
+// NavigationView lists six pages — Dictation, Clicky, Island, Keys & Plans, Privacy, General — with
 // a search over every setting at the top and incognito and the account at the foot. Rows on a page
 // open the pages under it (Your words, How it writes and The orb under Dictation; Calendars under
 // Island); the back button above the page returns, and the button opposite it picks the appearance. Every way in
@@ -35,7 +35,6 @@ public sealed class DictationWindow : WpfUi.FluentWindow, IMainWindowActions
     private readonly WpfUi.NavigationView navigation;
     private readonly WpfUi.TextBox searchBox;
     private readonly Dictionary<DictationDestination, WpfUi.NavigationViewItem> sidebarItems = [];
-    private readonly ContentControl footerAccount = new() { Focusable = false, HorizontalContentAlignment = HorizontalAlignment.Stretch };
     private readonly ContentControl contentHost = new() { Focusable = false, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
     /// <summary>The page with its toolbar above it: back on the left, appearance on the right.</summary>
     private readonly Grid pageArea = new();
@@ -150,10 +149,9 @@ public sealed class DictationWindow : WpfUi.FluentWindow, IMainWindowActions
 
         Model.PropertyChanged += OnModelChanged;
         services.Settings.PropertyChanged += (_, _) => Dispatcher.BeginInvoke(RefreshIfRowsChanged);
-        void OnShellChanged() => Dispatcher.BeginInvoke(() => { RefreshIfRowsChanged(); RenderFooterAccount(); });
+        void OnShellChanged() => Dispatcher.BeginInvoke(RefreshIfRowsChanged);
         OpenClickyConfiguration.SettingsChanged += OnShellChanged;
         ShellSettingsRevision.Changed += OnShellChanged;
-        services.Auth.PropertyChanged += (_, _) => Dispatcher.BeginInvoke(RenderFooterAccount);
         Closed += (_, _) =>
         {
             OpenClickyConfiguration.SettingsChanged -= OnShellChanged;
@@ -162,7 +160,6 @@ public sealed class DictationWindow : WpfUi.FluentWindow, IMainWindowActions
 
         PreviewKeyDown += OnPreviewKeyDown;
         Closing += OnClosing;
-        RenderFooterAccount();
         Render();
     }
 
@@ -402,36 +399,7 @@ public sealed class DictationWindow : WpfUi.FluentWindow, IMainWindowActions
             return row;
         }, Changes.Of(services.Settings, nameof(DictationSettings.Incognito)));
         footer.Children.Add(incognitoRow);
-        var secondDivider = new Border { Height = 1, Margin = new Thickness(8, 4, 8, 4) };
-        secondDivider.SetResourceReference(Border.BackgroundProperty, SettingsLook.Divider);
-        footer.Children.Add(secondDivider);
-        footer.Children.Add(footerAccount);
         return footer;
-    }
-
-    private void RenderFooterAccount()
-    {
-        var auth = services.Auth;
-        var name = AccountRows.AccountName(auth.AccountEmail, WindowsUserName.FullName);
-        var text = new StackPanel { Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-        text.Children.Add(Ui.Text(name, 14, SettingsLook.TextPrimary, FontWeights.Medium, wrap: false));
-        text.Children.Add(Ui.Text(AccountRows.AccountStanding(auth.AccountEmail is not null, auth.IsGuestWithoutEmail), SettingsLook.CaptionSize, SettingsLook.TextSecondary, wrap: false));
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 6, 10, 6) };
-        row.Children.Add(AccountProfileRow.Avatar(AccountRows.AccountInitial(name), auth.AccountEmail is not null, 30));
-        row.Children.Add(text);
-        var button = new WpfUi.Button
-        {
-            Content = row,
-            Appearance = WpfUi.ControlAppearance.Transparent,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Left,
-            BorderThickness = new Thickness(0),
-            Padding = new Thickness(0),
-            Cursor = Cursors.Hand,
-            ToolTip = "Account",
-        };
-        button.Click += (_, _) => Model.Select(DictationSettingsPage.Account);
-        footerAccount.Content = button;
     }
 
     // MARK: - keys, closing, frame

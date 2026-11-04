@@ -650,12 +650,11 @@ internal sealed class TourKeycapsView : StackPanel
 }
 
 /// <summary>A tour card: the illustration (animated keycaps or a symbol on the tinted disc), the title and copy, the
-/// field / status / microphone lines, the progress dashes, and the buttons (FirstRunTourCardView).</summary>
+/// status / microphone lines, the progress dashes, and the buttons (FirstRunTourCardView).</summary>
 internal sealed class TourCardView : Grid, IIslandContent
 {
     private readonly IslandCompanionModel hub;
     private readonly TourKeycapsView? keycaps;
-    private readonly TextBox? field;
 
     public TourCardView(IslandCompanionModel hub, FirstRunTourCard card, double topInset)
     {
@@ -692,36 +691,6 @@ internal sealed class TourCardView : Grid, IIslandContent
         detail.LineHeight = 16;
         detail.MaxHeight = 16 * 3 + 1;
         copy.Children.Add(detail);
-        if (card.Field is { } fieldKind)
-        {
-            var fieldHost = new Grid();
-            var placeholder = Text(fieldKind == FirstRunTourFieldKind.Email ? "you@example.com" : "6-digit code", 13, DS.Brush(Colors.White, 0.45));
-            field = ComposerView.MakeField(13);
-            field.Text = hub.TourFieldText;
-            placeholder.Visibility = field.Text.Length == 0 ? Visibility.Visible : Visibility.Hidden;
-            field.TextChanged += (_, _) =>
-            {
-                hub.TourFieldText = field.Text;
-                placeholder.Visibility = field.Text.Length == 0 ? Visibility.Visible : Visibility.Hidden;
-            };
-            field.PreviewKeyDown += (_, eventArgs) =>
-            {
-                if (eventArgs.Key != Key.Enter) return;
-                eventArgs.Handled = true;
-                hub.SubmitTourFieldCommand.Execute(null);
-            };
-            fieldHost.Children.Add(placeholder);
-            fieldHost.Children.Add(field);
-            copy.Children.Add(new Border
-            {
-                Background = DS.HUD.SurfaceRaisedBrush,
-                CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(10, 4, 10, 4),
-                Height = 30,
-                Margin = new Thickness(0, 4, 0, 0),
-                Child = fieldHost,
-            });
-        }
         if (card.Status is { } status)
         {
             var statusLine = Text(status, 12, card.StatusIsGood ? DS.HUD.GoodBrush : DS.HUD.PointerBrush, FontWeights.Medium, wrapping: TextWrapping.Wrap);
@@ -769,12 +738,6 @@ internal sealed class TourCardView : Grid, IIslandContent
         Children.Add(buttons);
     }
 
-    public void FocusField()
-    {
-        if (field is null) return;
-        field.Focus();
-        Keyboard.Focus(field);
-    }
 
     public void Refresh() { }
 

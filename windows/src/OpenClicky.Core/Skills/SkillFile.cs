@@ -1,7 +1,7 @@
 // Port of macos/OpenClicky/OpenClicky/SkillFile.swift
 //
 // A Hermes-style SKILL.md: YAML frontmatter (flat keys, inline `[a, b]` lists) followed by a
-// Markdown body. Mirrors agent/src/skillMarkdown.ts so the app, the CLI, and the backend agree on
+// Markdown body. Mirrors agent/src/skillMarkdown.ts so the app and the CLI agree on
 // what a skill is. Used for the app-teaching skills in `app-skills/` and the user library in
 // `%USERPROFILE%\.openclicky\skills\library`.
 

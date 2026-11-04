@@ -137,7 +137,7 @@ public class SpokenChunkerTests
         Assert.Equal(new[] { "that came out in 1990." }, chunker.Feed("that came out in 1990. after"));
     }
 
-    // F-40: the backend speaks at most 400 characters of a piece (JavaScript length, UTF-16).
+    // F-40: a voice is given at most 400 characters of a piece (JavaScript length, UTF-16).
     public static TheoryData<string, string> LongAnswers => new()
     {
         { "english, no sentence end", string.Concat(Enumerable.Repeat("word ", 400)) },

@@ -3,10 +3,10 @@
 //  OpenClicky
 //
 //  Who speaks the answers. The person picks in Settings → Clicky → Voice from what they have: the
-//  free voice on an account, a voice key (OpenAI, ElevenLabs, Google Cloud, Amazon Polly, Sarvam),
+//  a voice key (OpenAI, ElevenLabs, Google Cloud, Amazon Polly, Sarvam),
 //  Kokoro (an open model downloaded only when picked), or this Mac's own voice. Automatic takes the
 //  first that can speak, own keys first. Every cloud request goes straight to its vendor from this
-//  Mac; none of these keys is ever sent to the OpenClicky backend. Request building is pure so it is
+//  Mac. Request building is pure so it is
 //  tested without a network (SpeechVoicesTests).
 //
 
@@ -15,7 +15,6 @@ import Foundation
 
 enum SpeechVoiceChoice: String, CaseIterable, Identifiable {
     case automatic
-    case account
     case openAI = "openai"
     case elevenLabs = "elevenlabs"
     case google
@@ -38,7 +37,6 @@ enum SpeechVoiceChoice: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .automatic: return "Automatic"
-        case .account: return "Free voice (ElevenLabs)"
         case .openAI: return "OpenAI"
         case .elevenLabs: return "ElevenLabs (your key)"
         case .google: return "Google Cloud"
@@ -50,19 +48,17 @@ enum SpeechVoiceChoice: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Automatic's order: own keys first (the person chose to pay for them), then the account's
-    /// ElevenLabs voice (FlowsXR's grant pays for it, with a generous monthly allowance), then Kokoro
-    /// if someone downloaded it, then this Mac. Gemini comes last of the keys: its voice takes about
-    /// four seconds a sentence.
-    static let automaticOrder: [SpeechVoiceChoice] = [.openAI, .elevenLabs, .google, .polly, .sarvam, .gemini, .account, .kokoro, .mac]
+    /// Automatic's order: own keys first (the person chose to pay for them), then Kokoro if someone
+    /// downloaded it, then this Mac. Gemini comes last of the keys: its voice takes about four
+    /// seconds a sentence.
+    static let automaticOrder: [SpeechVoiceChoice] = [.openAI, .elevenLabs, .google, .polly, .sarvam, .gemini, .kokoro, .mac]
 
     /// Whether this voice can speak right now in `languageCode` with these settings.
-    static func canSpeak(_ choice: SpeechVoiceChoice, settings: OpenClickyShellSettings, hasAccount: Bool,
+    static func canSpeak(_ choice: SpeechVoiceChoice, settings: OpenClickyShellSettings,
                          kokoroInstalled: Bool, languageCode: String) -> Bool {
         func has(_ key: String?) -> Bool { !(key?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "").isEmpty }
         switch choice {
         case .automatic: return false
-        case .account: return hasAccount
         case .openAI: return has(settings.openaiApiKey)
         case .elevenLabs: return has(settings.elevenLabsApiKey)
         case .google: return has(settings.googleCloudApiKey)
@@ -75,17 +71,17 @@ enum SpeechVoiceChoice: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The voices the picker offers: Automatic, every voice there is a key or account for, Kokoro
+    /// The voices the picker offers: Automatic, every voice there is a key for, Kokoro
     /// (picking it downloads it), and this Mac. The one already picked stays listed even if its key
     /// went, so the picker never shows a blank.
-    static func offered(settings: OpenClickyShellSettings, hasAccount: Bool, languageCode: String) -> [SpeechVoiceChoice] {
+    static func offered(settings: OpenClickyShellSettings, languageCode: String) -> [SpeechVoiceChoice] {
         let picked = SpeechVoiceChoice(stored: settings.speechVoice)
         return allCases.filter { choice in
             switch choice {
             case .automatic, .mac: return true
             case .kokoro: return choice == picked || KokoroVoice.speaker(forLanguage: languageCode, picked: nil) != nil
             default:
-                return choice == picked || canSpeak(choice, settings: settings, hasAccount: hasAccount, kokoroInstalled: false, languageCode: languageCode)
+                return choice == picked || canSpeak(choice, settings: settings, kokoroInstalled: false, languageCode: languageCode)
             }
         }
     }
@@ -93,32 +89,22 @@ enum SpeechVoiceChoice: String, CaseIterable, Identifiable {
     /// The voice that speaks now: the one picked if it can, else this Mac's (a missing key or a
     /// Kokoro still downloading); Automatic, the first in `automaticOrder` that can. Kokoro in a
     /// language it doesn't speak (it became the voice on its own, then the language changed) goes
-    /// on as Automatic. While the account voice rests (`AccountVoiceRest`: two slow or failed answers
-    /// in a row) Automatic passes it by; a voice picked by hand is never passed by.
-    static func resolve(settings: OpenClickyShellSettings, hasAccount: Bool, kokoroInstalled: Bool, languageCode: String,
-                        accountVoiceIsResting: Bool = false) -> SpeechVoiceChoice {
+    /// on as Automatic.
+    static func resolve(settings: OpenClickyShellSettings, kokoroInstalled: Bool, languageCode: String) -> SpeechVoiceChoice {
         let picked = SpeechVoiceChoice(stored: settings.speechVoice)
         let kokoroCantSpeakLanguage = picked == .kokoro && KokoroVoice.speaker(forLanguage: languageCode, picked: nil) == nil
-        let automaticCandidates = accountVoiceIsResting ? automaticOrder.filter { $0 != .account } : automaticOrder
-        let candidates = picked == .automatic || kokoroCantSpeakLanguage ? automaticCandidates : [picked]
+        let candidates = picked == .automatic || kokoroCantSpeakLanguage ? automaticOrder : [picked]
         return candidates.first {
-            canSpeak($0, settings: settings, hasAccount: hasAccount, kokoroInstalled: kokoroInstalled, languageCode: languageCode)
+            canSpeak($0, settings: settings, kokoroInstalled: kokoroInstalled, languageCode: languageCode)
         } ?? .mac
     }
 
     /// `resolve` with this Mac's settings.
     @MainActor static func current() -> SpeechVoiceChoice {
-        resolve(settings: OpenClickyConfiguration.settings, hasAccount: OpenClickyConfiguration.hasAccountToken,
-                kokoroInstalled: KokoroVoice.isInstalled, languageCode: ReplyLanguage.currentCode,
-                accountVoiceIsResting: AccountVoiceRest.isResting)
+        resolve(settings: OpenClickyConfiguration.settings, kokoroInstalled: KokoroVoice.isInstalled,
+                languageCode: ReplyLanguage.currentCode)
     }
 
-    /// The voice that takes over when the account voice is late or fails: Kokoro when it is
-    /// downloaded and speaks the language (offline, under a second a sentence once loaded), else this Mac.
-    static func fastestLocalVoice(kokoroInstalled: Bool, languageCode: String) -> SpeechVoiceChoice {
-        canSpeak(.kokoro, settings: OpenClickyShellSettings(), hasAccount: false, kokoroInstalled: kokoroInstalled,
-                 languageCode: languageCode) ? .kokoro : .mac
-    }
 }
 
 // MARK: - Amazon credentials
@@ -220,8 +206,7 @@ enum CloudVoiceRequests {
         return request
     }
 
-    /// The ElevenLabs text-to-speech body, for an own key here and for the account's free voice
-    /// (the backend's /tts relays it to ElevenLabs), so both ask for the same model and settings.
+    /// The ElevenLabs text-to-speech body, for an own key.
     static func elevenLabsSpeechBody(text: String) throws -> Data {
         try JSONSerialization.data(withJSONObject: [
             "text": text, "model_id": elevenLabsModel,
@@ -350,7 +335,7 @@ enum CloudVoiceError: Error, LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case let .noKey(vendor): return "\(vendor) needs a key under Settings → Keys & Account."
+        case let .noKey(vendor): return "\(vendor) needs a key under Settings → Keys & Plans."
         case let .refused(vendor, status, message): return "\(vendor) refused (\(status)): \(message)"
         case let .unreadable(vendor): return "\(vendor)'s answer had no audio in it."
         }
@@ -359,8 +344,7 @@ enum CloudVoiceError: Error, LocalizedError, Equatable {
 
 // MARK: - Speaking
 
-/// The audio for one piece of an answer in a voice that needs no account (the account's voice goes
-/// through the backend, in AnswerVoicePlayer). Shared by the answers and the keys' Test buttons.
+/// The audio for one piece of an answer. Shared by the answers and the keys' Test buttons.
 enum CloudVoiceSpeaker {
     @MainActor
     static func audio(for text: String, voice: SpeechVoiceChoice, settings: OpenClickyShellSettings = OpenClickyConfiguration.settings,
@@ -390,7 +374,7 @@ enum CloudVoiceSpeaker {
             return try await SarvamSpeechClient(key: key(settings.sarvamKey, "Sarvam")).speech(text: text, languageCode: languageCode)
         case .kokoro:
             return try await KokoroVoice.shared.audio(for: text, languageCode: languageCode)
-        case .mac, .automatic, .account:
+        case .mac, .automatic:
             return try await MacVoice.shared.audio(for: text)
         }
     }

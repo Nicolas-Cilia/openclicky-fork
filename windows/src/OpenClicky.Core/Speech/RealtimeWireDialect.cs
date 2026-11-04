@@ -31,7 +31,7 @@ public static class RealtimeVoiceProviders
 
     /// <summary>
     /// The provider the next connection uses, with how it pays: an own key goes straight to its
-    /// vendor; with no realtime key, an account's token gets OpenAI through the backend.
+    /// vendor.
     /// <paramref name="preferred"/> is the person's pick (null: automatic, OpenAI first, its prompts
     /// and pointing were tuned on it). A pick without its key falls back to automatic.
     /// </summary>
@@ -40,16 +40,15 @@ public static class RealtimeVoiceProviders
         bool Usable(RealtimeVoiceProvider provider) => provider switch
         {
             RealtimeVoiceProvider.Gemini => credentials.GeminiKey is not null,
-            _ => credentials.OpenAIKey is not null || credentials.AccountToken is not null,
+            _ => credentials.OpenAIKey is not null,
         };
         if (preferred is { } picked && Usable(picked)) return picked;
         if (credentials.OpenAIKey is not null) return RealtimeVoiceProvider.OpenAI;
         if (credentials.GeminiKey is not null) return RealtimeVoiceProvider.Gemini;
-        if (credentials.AccountToken is not null) return RealtimeVoiceProvider.OpenAI;
         return null;
     }
 
-    /// <summary>Whether any own key can run realtime voice (an account alone is decided by its plan).</summary>
+    /// <summary>Whether any own key can run realtime voice .</summary>
     public static bool HasOwnKey(ProviderCredentials credentials) => credentials.OpenAIKey is not null || credentials.GeminiKey is not null;
 }
 

@@ -1,6 +1,6 @@
 // Ports OpenAIAudioTranscriptionProvider.swift: upload transcription on OpenAI's audio
 // transcription API. The take is buffered and sent as one WAV on release, straight to OpenAI on
-// the person's own key or through the OpenClicky backend (POST /agent/transcribe) on the account.
+// the person's own key.
 
 using System.Text;
 using System.Text.Json;
@@ -13,9 +13,7 @@ namespace OpenClicky.Core.Speech;
 
 public sealed class OpenAIAudioTranscriptionProvider : IBuddyTranscriptionProvider
 {
-    // ProviderRouter decides where each upload goes: with the person's own OpenAI key, straight to
-    // OpenAI's /audio/transcriptions; otherwise through the backend on the account's token.
-    public string DisplayName => "OpenClicky";
+    public string DisplayName => "OpenAI";
     public bool RequiresSpeechRecognitionPermission => false;
 
     /// <summary>The language to transcribe in (a bare code such as "hi"); null lets the model detect
@@ -27,7 +25,7 @@ public sealed class OpenAIAudioTranscriptionProvider : IBuddyTranscriptionProvid
         this.language = language ?? (() => ReplyLanguage.CurrentCode);
     }
 
-    /// <summary>An own OpenAI key (straight to OpenAI) or an account (the backend).</summary>
+    /// <summary>An own OpenAI key.</summary>
     public bool IsConfigured => UnavailableExplanation is null;
 
     public string? UnavailableExplanation =>
@@ -74,19 +72,6 @@ public sealed class OpenAIAudioTranscriptionProvider : IBuddyTranscriptionProvid
             + string.Join(", ", normalizedKeyterms) + ".";
     }
 
-    /// <summary>The backend's /agent/transcribe body: base64 WAV, mime, and the language and prompt when there are any.</summary>
-    public static JsonObject BackendRequestBody(byte[] wav, string? language, string? prompt)
-    {
-        var body = new JsonObject
-        {
-            ["audio"] = Convert.ToBase64String(wav),
-            ["mime"] = "audio/wav",
-        };
-        if (!string.IsNullOrEmpty(language)) body["language"] = language;
-        if (prompt is not null) body["prompt"] = prompt;
-        return body;
-    }
-
     /// <summary>The trimmed `text` of a transcription answer; null when there is none.</summary>
     public static string? ParseTranscript(byte[] data)
     {
@@ -124,8 +109,6 @@ internal sealed class OpenAIAudioTranscriptionSession(
     private bool hasRequestedFinalTranscript;
     private bool hasDeliveredFinalTranscript;
     private bool isCancelled;
-
-    private static string TranscriptionUrl => $"{OpenClickyConfiguration.BackendBaseUrl}/agent/transcribe";
 
     public void AppendAudio(AudioFrame frame)
     {
@@ -217,8 +200,7 @@ internal sealed class OpenAIAudioTranscriptionSession(
         {
             case ProviderRouteKind.OpenAIDirect:
             {
-                // The person's own OpenAI key: the multipart upload the backend would have built,
-                // sent to OpenAI itself. The answer is the same `{ "text": … }`.
+                // The person's own OpenAI key: the multipart upload, sent to OpenAI itself.
                 var openAIKey = ProviderRouter.CurrentCredentials().OpenAIKey
                     ?? throw new TranscriptionProviderException(ProviderRouter.NeedsOpenAIKeySentence);
                 var request = DirectProviderRequests.OpenAITranscription(openAIKey, wavAudioData, language, prompt);
@@ -228,17 +210,7 @@ internal sealed class OpenAIAudioTranscriptionSession(
             case ProviderRouteKind.Unavailable:
                 throw new TranscriptionProviderException(route.Sentence ?? ProviderRouter.NeedsOpenAIKeySentence);
             default:
-            {
-                if (!Uri.TryCreate(TranscriptionUrl, UriKind.Absolute, out var transcriptionUri))
-                    throw new TranscriptionProviderException("OpenClicky backend URL is invalid.");
-                var request = new HttpRequestMessage(HttpMethod.Post, transcriptionUri)
-                {
-                    Content = DirectProviderRequests.JsonContent(OpenAIAudioTranscriptionProvider.BackendRequestBody(wavAudioData, language, prompt)),
-                };
-                OpenClickyConfiguration.Authorize(request);
-                response = await BackendSignIn.SendAsync(request, sent => HttpClients.Shared.SendAsync(sent, timeout.Token)).ConfigureAwait(false);
-                break;
-            }
+                throw new TranscriptionProviderException(ProviderRouter.NeedsOpenAIKeySentence);
         }
         using (response)
         {
@@ -247,10 +219,10 @@ internal sealed class OpenAIAudioTranscriptionSession(
             if (statusCode is < 200 or > 299)
             {
                 var responseText = Encoding.UTF8.GetString(responseData);
-                throw new TranscriptionProviderException($"OpenClicky transcription failed (HTTP {statusCode}): {responseText}");
+                throw new TranscriptionProviderException($"OpenAI transcription failed (HTTP {statusCode}): {responseText}");
             }
             return OpenAIAudioTranscriptionProvider.ParseTranscript(responseData)
-                ?? throw new TranscriptionProviderException("OpenClicky transcription returned an empty transcript.");
+                ?? throw new TranscriptionProviderException("OpenAI transcription returned an empty transcript.");
         }
     }
 

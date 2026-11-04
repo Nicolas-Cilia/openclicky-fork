@@ -26,8 +26,12 @@ reference/windows/*/
 # Sparkle's private EdDSA key, exported for the release script (generate_keys -x); never committed
 macos/OpenClicky/scripts/*.key
 
+# Certificates and private keys: never committed, anywhere in the repo
+*.p12
+*.pfx
+*.pem
+
 # Linux client
-linux/.venv/
 __pycache__/
 .pytest_cache/
 *.egg-info/

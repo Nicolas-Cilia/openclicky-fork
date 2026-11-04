@@ -60,7 +60,6 @@ public sealed class IslandWindowManager : IDisposable
         hub.CloseComposerRequested += CloseTextComposer;
         hub.OpenPanelRequested += OpenPanel;
         hub.DismissPanelsRequested += DismissPanels;
-        hub.FocusTourFieldRequested += FocusTourField;
         hub.PlacementChangeRequested += SetPlacement;
         screens.DisplaysChanged += OnDisplaysChanged;
         // A plugin switched on, the default or order changed, or one of home's columns turned on or off in Settings: every
@@ -340,11 +339,6 @@ public sealed class IslandWindowManager : IDisposable
         }
     }
 
-    private void FocusTourField()
-    {
-        if (PrimaryInstance is { } primaryInstance && primaryInstance.Model.Expansion == IslandExpansion.Tour) primaryInstance.Window.FocusTourField();
-    }
-
     /// <summary>The plugins that read something in the background follow their switches (NotchHUDManager.syncOptionalComponents):
     /// the Coding agents' slow poll feeds the peek line, and Now playing asks the media sessions only while it is on.</summary>
     private void SyncPluginStores()
@@ -416,7 +410,6 @@ public sealed class IslandWindowManager : IDisposable
         hub.CloseComposerRequested -= CloseTextComposer;
         hub.OpenPanelRequested -= OpenPanel;
         hub.DismissPanelsRequested -= DismissPanels;
-        hub.FocusTourFieldRequested -= FocusTourField;
         hub.PlacementChangeRequested -= SetPlacement;
         screens.DisplaysChanged -= OnDisplaysChanged;
         foreach (var instance in instances) instance.Window.Close();

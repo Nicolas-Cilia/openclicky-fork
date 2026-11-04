@@ -1,5 +1,5 @@
 // Ports Dictation/UI/SettingsLayout.swift: where every setting lives, in one table. Six pages in the
-// sidebar (Dictation, Clicky, Island, Keys & Account, Privacy, General) and the pages they open (The
+// sidebar (Dictation, Clicky, Island, Keys & Plans, Privacy, General) and the pages they open (The
 // orb, Calendars, Your words, How it writes). The rows are built in SettingsCatalog and drawn by the
 // window's Settings*Page.cs files; this file only decides their page, their group and their order.
 //
@@ -41,7 +41,7 @@ public static class SettingsLayout
 
     private static readonly IReadOnlyList<Group> ClickyGroups =
     [
-        new(DictationSettingsPage.Clicky, "", ["keyboard.talk", "clicky.speechVoice", "clicky.language", "clicky.answerSource"]),
+        new(DictationSettingsPage.Clicky, "", ["keyboard.talk", "clicky.speechVoice", "clicky.language", "clicky.answerSource", "clicky.backupSource"]),
         new(DictationSettingsPage.Clicky, "Hands-free", ["clicky.fastVoice", "clicky.realtimeProvider", "clicky.fastVoiceNeedsKey", "clicky.alwaysListening"]),
         new(DictationSettingsPage.Clicky, "Pointer", ["clicky.pointer"]),
         new(DictationSettingsPage.Clicky, "More",
@@ -62,10 +62,9 @@ public static class SettingsLayout
 
     private static readonly IReadOnlyList<Group> AccountGroups =
     [
-        new(DictationSettingsPage.Account, "", ["account.profile", "account.plan", "account.usage.backend"]),
-        new(DictationSettingsPage.Account, "Your keys", ["account.keys", "account.keysNote"]),
-        new(DictationSettingsPage.Account, "Plans", ["account.claudeCodePlan", "account.codexPlan", "account.plansNote"]),
-        new(DictationSettingsPage.Account, "Advanced", ["account.usage.sarvam", "account.backendHost", "account.backendToken"]) { IsAdvanced = true },
+        new(DictationSettingsPage.Keys, "Your keys", ["keys.list", "keys.keysNote"]),
+        new(DictationSettingsPage.Keys, "Plans", ["keys.claudeCodePlan", "keys.codexPlan", "keys.usage.claudeCodePlan", "keys.usage.codexPlan", "keys.plansNote"]),
+        new(DictationSettingsPage.Keys, "Advanced", ["keys.usage.sarvam"]) { IsAdvanced = true },
     ];
 
     private static readonly IReadOnlyList<Group> PrivacyGroups =
@@ -73,7 +72,7 @@ public static class SettingsLayout
         new(DictationSettingsPage.Privacy, "Permissions", ["privacy.microphone", "calendar.access"]),
         new(DictationSettingsPage.Privacy, "Your screen", ["privacy.readNearbyText", "privacy.pauseBeforeSendingScreen"]),
         new(DictationSettingsPage.Privacy, "What it keeps",
-            ["privacy.memoryOnThisMac", "privacy.clipboardHistory", "privacy.retryFailedTakes", "privacy.deleteTakes", "privacy.summary"]),
+            ["privacy.memoryOnThisMac", "privacy.clipboardHistory", "privacy.retryFailedTakes", "privacy.agentSessions", "privacy.deleteTakes", "privacy.summary"]),
         // Incognito's switch is in the sidebar's foot; search still finds it here.
         new(DictationSettingsPage.Privacy, "Sidebar", ["privacy.incognito"]) { ShowsOnPage = false },
         new(DictationSettingsPage.Privacy, "Where things live", ["privacy.whereHistory", "privacy.whereSpace", "privacy.whereKeys"]) { IsAdvanced = true },

@@ -4,10 +4,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export interface AgentConfig {
-  /** OpenClicky backend base URL (no trailing slash). */
-  backendUrl: string;
-  /** Supabase JWT or exchanged session token presented to the backend. */
-  token?: string;
+  /** OpenAI API base for calls on the person's own key (no trailing slash). */
+  openaiBaseUrl: string;
+  /** Anthropic API base for calls on the person's own key (no trailing slash). */
+  anthropicBaseUrl: string;
+  /** The ChatGPT sign-in Codex keeps (`codex login`); agent runs without an own key use it. */
+  codexAuthFile: string;
   /** Isolated CODEX_HOME. Stable across runs so threads can be resumed. */
   codexHome: string;
   /** Codex binary (name on PATH or absolute path). */
@@ -33,9 +35,9 @@ export interface AgentConfig {
   ffmpegBin: string;
   /** The user's skill library root (library/, active/, activations.json). Shared with the macOS app. */
   userSkillsDir: string;
-  /** The user's own OpenAI key (bring your own key): sent to the backend per request, never stored there. */
+  /** The user's own OpenAI key: optional, goes straight to OpenAI. Without it agent runs use the ChatGPT sign-in. */
   openaiApiKey?: string;
-  /** Optional Anthropic key for the Claude lanes when bringing your own keys. */
+  /** The user's own Anthropic key: optional, goes straight to Anthropic. */
   anthropicApiKey?: string;
   /** Wall-clock cap (ms) on a single CodexAgent.run() turn before it rejects instead of hanging
    *  forever on a Codex bug that never emits a terminal event. See codex.ts DEFAULT_RUN_TIMEOUT_MS. */
@@ -85,8 +87,9 @@ function resolveCuaDriverBin(configured: string | undefined, home: string): stri
 export function resolveConfig(flags: Partial<AgentConfig> = {}, env: NodeJS.ProcessEnv = process.env): AgentConfig {
   const home = env.HOME ?? os.homedir();
   return {
-    backendUrl: stripSlash(flags.backendUrl ?? env.OPENCLICKY_BACKEND_URL ?? env.BACKEND_URL ?? "https://api.openclicky.org"),
-    token: flags.token ?? env.OPENCLICKY_TOKEN ?? undefined,
+    openaiBaseUrl: stripSlash(flags.openaiBaseUrl ?? env.OPENCLICKY_OPENAI_BASE_URL ?? "https://api.openai.com/v1"),
+    anthropicBaseUrl: stripSlash(flags.anthropicBaseUrl ?? env.OPENCLICKY_ANTHROPIC_BASE_URL ?? "https://api.anthropic.com"),
+    codexAuthFile: flags.codexAuthFile ?? path.join(env.OPENCLICKY_PERSONAL_CODEX_HOME ?? path.join(home, ".codex"), "auth.json"),
     codexHome: flags.codexHome ?? env.OPENCLICKY_CODEX_HOME ?? path.join(home, ".openclicky", "codex-home"),
     codexBin: flags.codexBin ?? env.OPENCLICKY_CODEX_BIN ?? "codex",
     workspace: path.resolve(flags.workspace ?? env.OPENCLICKY_WORKSPACE ?? process.cwd()),

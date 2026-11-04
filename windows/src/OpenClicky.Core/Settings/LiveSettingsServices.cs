@@ -105,19 +105,18 @@ public sealed class LiveSettingsServices(IModelDownload kokoro, IModelDownload p
     public VoicePickerState VoicePicker(AppRegion region)
     {
         var shell = OpenClickyConfiguration.Settings;
-        var hasAccount = OpenClickyConfiguration.HasAccountToken;
         var languageCode = ReplyLanguage.CurrentCode;
         var kokoroInstalled = Kokoro.State.Kind == ModelDownloadState.Stage.Installed;
         var picked = SpeechVoiceChoices.FromStored(shell.SpeechVoice);
-        var offered = SpeechVoiceChoices.Offered(shell, hasAccount, languageCode);
-        var speaking = SpeechVoiceChoices.Resolve(shell, hasAccount, kokoroInstalled, languageCode);
+        var offered = SpeechVoiceChoices.Offered(shell, languageCode);
+        var speaking = SpeechVoiceChoices.Resolve(shell, kokoroInstalled, languageCode);
         string sentence;
         if (picked != SpeechVoiceChoice.Automatic && picked != speaking)
         {
-            var standIn = speaking == SpeechVoiceChoice.Account ? "the free voice" : "this PC’s voice";
+            const string standIn = "this PC’s voice";
             sentence = picked == SpeechVoiceChoice.Kokoro
                 ? $"{standIn} until Kokoro is downloaded."
-                : $"{standIn}: {picked.Title()} needs its key under Keys & Account.";
+                : $"{standIn}: {picked.Title()} needs its key under Keys & Plans.";
         }
         else
         {
@@ -130,7 +129,6 @@ public sealed class LiveSettingsServices(IModelDownload kokoro, IModelDownload p
                 SpeechVoiceChoice.Polly => "Amazon Polly, on your own key.",
                 SpeechVoiceChoice.Sarvam => "Sarvam, on your own key.",
                 SpeechVoiceChoice.Kokoro => "Kokoro, on this PC. Free, offline, nothing counted.",
-                SpeechVoiceChoice.Account => "ElevenLabs, through OpenClicky.",
                 _ => "this PC’s voice. Free, offline, nothing counted.",
             };
         }
@@ -158,9 +156,7 @@ public sealed class LiveSettingsServices(IModelDownload kokoro, IModelDownload p
         {
             var choice = SpeechVoiceChoices.FromStored(voiceId);
             if (choice == SpeechVoiceChoice.Automatic) choice = SpeechVoiceChoices.Current();
-            var audio = choice == SpeechVoiceChoice.Account
-                ? await new AnswerVoicePlayer(previewPlayer, () => $"{OpenClickyConfiguration.BackendBaseUrl}/tts").FetchAudioAsync(PreviewSentence)
-                : await CloudVoiceSpeaker.AudioAsync(PreviewSentence, choice);
+            var audio = await CloudVoiceSpeaker.AudioAsync(PreviewSentence, choice);
             await previewPlayer.PlayToCompletionAsync(audio);
         }
         catch (Exception error)

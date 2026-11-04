@@ -536,15 +536,14 @@ public class TeacherPluginTests
         Assert.Equal("none", body["reasoning_effort"]!.GetValue<string>());
     }
 
-    private static ProviderCredentials Credentials(string? openAI = null, string? anthropic = null, string? account = null, string? gemini = null, bool claudeCodePlan = false) =>
-        new(openAI, anthropic, account, geminiKey: gemini, claudeCodePlanOn: claudeCodePlan);
+    private static ProviderCredentials Credentials(string? openAI = null, string? anthropic = null, string? gemini = null, bool claudeCodePlan = false) =>
+        new(openAI, anthropic, geminiKey: gemini, claudeCodePlanOn: claudeCodePlan);
 
     [Fact]
     public void LessonsAreWrittenWithoutOpenAITooButNeverOnAPlanAlone()
     {
-        Assert.Equal(new TeacherSketchWriter.Route.OpenAI("sk-o"), TeacherSketchWriter.RouteFor(Credentials(openAI: "sk-o", anthropic: "sk-a", account: "t")));
-        Assert.Equal(new TeacherSketchWriter.Route.Anthropic("sk-a"), TeacherSketchWriter.RouteFor(Credentials(anthropic: "sk-a", account: "t")));
-        Assert.Equal(new TeacherSketchWriter.Route.Account(), TeacherSketchWriter.RouteFor(Credentials(account: "t", claudeCodePlan: true)));
+        Assert.Equal(new TeacherSketchWriter.Route.OpenAI("sk-o"), TeacherSketchWriter.RouteFor(Credentials(openAI: "sk-o", anthropic: "sk-a")));
+        Assert.Equal(new TeacherSketchWriter.Route.Anthropic("sk-a"), TeacherSketchWriter.RouteFor(Credentials(anthropic: "sk-a")));
         Assert.Equal(new TeacherSketchWriter.Route.AnswerSourceRoute(AnswerSource.Gemini), TeacherSketchWriter.RouteFor(Credentials(gemini: "g")));
         Assert.Null(TeacherSketchWriter.RouteFor(Credentials(claudeCodePlan: true)));
         Assert.Null(TeacherSketchWriter.RouteFor(Credentials()));

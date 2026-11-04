@@ -29,13 +29,13 @@ public sealed class OpenClickyConfigurationTests : IDisposable
     private static JsonObject JsonObjectAt(string filePath) => JsonNode.Parse(File.ReadAllText(filePath))!.AsObject();
 
     [Fact]
-    public void AnOwnKeyIsEnoughForModelCallsWithNoAccount()
+    public void AnOwnKeyOrAPlanIsEnoughForModelCalls()
     {
         var settings = new OpenClickyShellSettings { OpenaiApiKey = " sk-user ", AnthropicApiKey = "" };
         Assert.True(OpenClickyConfiguration.UsesOwnKeysFor(settings));
         Assert.True(OpenClickyConfiguration.IsConfiguredFor(settings));
         Assert.True(OpenClickyConfiguration.IsConfiguredFor(new OpenClickyShellSettings { AnthropicApiKey = "ak-user" }));
-        Assert.True(OpenClickyConfiguration.IsConfiguredFor(new OpenClickyShellSettings { Token = "tok" }));
+        Assert.True(OpenClickyConfiguration.IsConfiguredFor(new OpenClickyShellSettings { UseCodexPlan = true }));
         Assert.False(OpenClickyConfiguration.UsesOwnKeysFor(new OpenClickyShellSettings()));
         Assert.False(OpenClickyConfiguration.IsConfiguredFor(new OpenClickyShellSettings()));
     }
@@ -43,15 +43,15 @@ public sealed class OpenClickyConfigurationTests : IDisposable
     [Fact]
     public void CliEnvironmentCarriesTheUserKeysUnderOpenClickyNames()
     {
-        var settings = new OpenClickyShellSettings { OpenaiApiKey = "sk-user", Token = "tok" };
+        var settings = new OpenClickyShellSettings { OpenaiApiKey = "sk-user" };
         var baseEnvironment = new Dictionary<string, string> { ["OPENAI_API_KEY"] = "sk-leaked", ["ANTHROPIC_API_KEY"] = "ak-leaked", ["PATH"] = "C:\\bin" };
         var environment = OpenClickyConfiguration.CliProcessEnvironmentFor(settings, baseEnvironment);
         Assert.Equal("sk-user", environment["OPENCLICKY_OPENAI_KEY"]);
-        Assert.Equal("tok", environment["OPENCLICKY_TOKEN"]);
+        Assert.False(environment.ContainsKey("OPENCLICKY_TOKEN"));
+        Assert.False(environment.ContainsKey("BACKEND_URL"));
         Assert.False(environment.ContainsKey("OPENAI_API_KEY"));
         Assert.False(environment.ContainsKey("ANTHROPIC_API_KEY"));
         Assert.False(environment.ContainsKey("OPENCLICKY_ANTHROPIC_KEY"));
-        Assert.Equal(OpenClickyConfiguration.HostedBackendUrl, environment["BACKEND_URL"]);
         Assert.EndsWith("C:\\bin", environment["PATH"]);
     }
 
@@ -62,13 +62,6 @@ public sealed class OpenClickyConfigurationTests : IDisposable
         var environment = OpenClickyConfiguration.CliProcessEnvironmentFor(new OpenClickyShellSettings(),
             new Dictionary<string, string> { ["openai_api_key"] = "sk-leaked" });
         Assert.DoesNotContain(environment.Keys, key => key.Equals("OPENAI_API_KEY", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
-    public void TheBackendUrlLosesItsTrailingSlashes()
-    {
-        var environment = OpenClickyConfiguration.CliProcessEnvironmentFor(new OpenClickyShellSettings { BackendUrl = " http://localhost:8787// " }, NoEnvironment);
-        Assert.Equal("http://localhost:8787", environment["BACKEND_URL"]);
     }
 
     [Fact]
@@ -128,8 +121,8 @@ public sealed class OpenClickyConfigurationTests : IDisposable
     public void WritingSettingsReplacesAnExistingFile()
     {
         var filePath = TemporarySettingsFile("{}");
-        OpenClickyConfiguration.WriteShellSettingsData("{\"token\":\"tok\"}", filePath);
-        Assert.Equal("{\"token\":\"tok\"}", File.ReadAllText(filePath));
+        OpenClickyConfiguration.WriteShellSettingsData("{\"model\":\"m\"}", filePath);
+        Assert.Equal("{\"model\":\"m\"}", File.ReadAllText(filePath));
     }
 
     // MARK: - shell.json updates (F-27)
@@ -137,10 +130,10 @@ public sealed class OpenClickyConfigurationTests : IDisposable
     [Fact]
     public void AnUpdateNeverRewritesAFileThatDoesNotDecode()
     {
-        const string original = """{"token":"old","sarvamKey":"sk-sarvam","openaiApiKey":"sk-openai","voiceSeconds":"5"}""";
+        const string original = """{"model":"old","sarvamKey":"sk-sarvam","openaiApiKey":"sk-openai","voiceSeconds":"5"}""";
         var filePath = TemporarySettingsFile(original);
 
-        var written = OpenClickyConfiguration.Update(filePath, settings => settings.Token = "new");
+        var written = OpenClickyConfiguration.Update(filePath, settings => settings.Model = "new");
 
         Assert.False(written);
         Assert.Equal(original, File.ReadAllText(filePath));
@@ -151,9 +144,9 @@ public sealed class OpenClickyConfigurationTests : IDisposable
     [Fact]
     public void AnUpdateNeverRewritesAFileThatIsNotJson()
     {
-        const string original = "{ token: oops";
+        const string original = "{ model: oops";
         var filePath = TemporarySettingsFile(original);
-        Assert.False(OpenClickyConfiguration.Update(filePath, settings => settings.Token = "new"));
+        Assert.False(OpenClickyConfiguration.Update(filePath, settings => settings.Model = "new"));
         Assert.Equal(original, File.ReadAllText(filePath));
         var reading = Assert.IsType<OpenClickyConfiguration.SettingsFileReading.Unreadable>(OpenClickyConfiguration.ReadSettingsFile(filePath));
         Assert.Equal("it isn't valid json", reading.Reason);
@@ -162,20 +155,20 @@ public sealed class OpenClickyConfigurationTests : IDisposable
     [Fact]
     public void AnUpdateKeepsFieldsItDoesNotKnow()
     {
-        var filePath = TemporarySettingsFile("""{"token":"old","sarvamKey":"sk-sarvam","futureSetting":{"depth":2},"refreshToken":"r1"}""");
+        var filePath = TemporarySettingsFile("""{"model":"old","sarvamKey":"sk-sarvam","futureSetting":{"depth":2},"language":"hi"}""");
 
         var written = OpenClickyConfiguration.Update(filePath, settings =>
         {
-            settings.Token = "new";
-            settings.RefreshToken = null;
+            settings.Model = "new";
+            settings.Language = null;
         });
 
         Assert.True(written);
         var jsonObject = JsonObjectAt(filePath);
-        Assert.Equal("new", (string?)jsonObject["token"]);
+        Assert.Equal("new", (string?)jsonObject["model"]);
         Assert.Equal("sk-sarvam", (string?)jsonObject["sarvamKey"]);
         Assert.Equal(2, (int?)jsonObject["futureSetting"]?["depth"]);
-        Assert.False(jsonObject.ContainsKey("refreshToken"));
+        Assert.False(jsonObject.ContainsKey("language"));
         // Defaults the file never spelled out are not written into it.
         Assert.False(jsonObject.ContainsKey("voiceSeconds"));
     }
@@ -183,12 +176,11 @@ public sealed class OpenClickyConfigurationTests : IDisposable
     [Fact]
     public void AFileWithOnlySomeFieldsReads()
     {
-        var filePath = TemporarySettingsFile("""{"token":"tok","sarvamKey":"sk-sarvam"}""");
+        var filePath = TemporarySettingsFile("""{"model":"m","sarvamKey":"sk-sarvam"}""");
         var settings = OpenClickyConfiguration.Load(filePath, NoEnvironment);
-        Assert.Equal("tok", settings.Token);
+        Assert.Equal("m", settings.Model);
         Assert.Equal("sk-sarvam", settings.SarvamKey);
         Assert.Equal(5, settings.VoiceSeconds);
-        Assert.Equal(OpenClickyConfiguration.HostedBackendUrl, settings.BackendUrl);
         Assert.Equal(["openclicky"], settings.CliCommand);
     }
 
@@ -202,16 +194,29 @@ public sealed class OpenClickyConfigurationTests : IDisposable
     [Fact]
     public void EnvironmentOverridesAreNeverWrittenToTheFile()
     {
-        var filePath = TemporarySettingsFile("""{"token":"old","backendUrl":"https://api.example.com"}""");
-        var environment = new Dictionary<string, string> { ["BACKEND_URL"] = "http://localhost:8787", ["OPENCLICKY_MODEL"] = "local-model" };
+        var filePath = TemporarySettingsFile("""{"workspace":"/tmp/w"}""");
+        var environment = new Dictionary<string, string> { ["OPENCLICKY_MODEL"] = "local-model" };
 
-        Assert.Equal("http://localhost:8787", OpenClickyConfiguration.Load(filePath, environment).BackendUrl);
-        Assert.True(OpenClickyConfiguration.Update(filePath, settings => settings.Token = "new"));
+        Assert.Equal("local-model", OpenClickyConfiguration.Load(filePath, environment).Model);
+        Assert.True(OpenClickyConfiguration.Update(filePath, settings => settings.Language = "hi"));
 
         var jsonObject = JsonObjectAt(filePath);
-        Assert.Equal("https://api.example.com", (string?)jsonObject["backendUrl"]);
+        Assert.Equal("/tmp/w", (string?)jsonObject["workspace"]);
         Assert.False(jsonObject.ContainsKey("model"));
-        Assert.Equal("new", (string?)jsonObject["token"]);
+        Assert.Equal("hi", (string?)jsonObject["language"]);
+    }
+
+    /// <summary>A file from when the app had accounts still reads, and the next save drops those fields.</summary>
+    [Fact]
+    public void OldAccountFieldsReadAndAreDroppedOnSave()
+    {
+        var filePath = TemporarySettingsFile("""{"backendUrl":"https://old.example","token":"tok","refreshToken":"r","tokenExpiresAt":1,"accountEmail":"a@b.c","sarvamKey":"sk"}""");
+        Assert.Equal("sk", OpenClickyConfiguration.Load(filePath, new Dictionary<string, string>()).SarvamKey);
+        Assert.True(OpenClickyConfiguration.Update(filePath, settings => settings.Language = "hi"));
+
+        var jsonObject = JsonObjectAt(filePath);
+        foreach (var dropped in new[] { "backendUrl", "token", "refreshToken", "tokenExpiresAt", "accountEmail" }) Assert.False(jsonObject.ContainsKey(dropped));
+        Assert.Equal("sk", (string?)jsonObject["sarvamKey"]);
     }
 
     [Fact]
@@ -226,19 +231,18 @@ public sealed class OpenClickyConfigurationTests : IDisposable
     public void AnUpdateCreatesAMissingFile()
     {
         var filePath = Path.Combine(temporaryDirectory, "new", "shell.json");
-        Assert.True(OpenClickyConfiguration.Update(filePath, settings => settings.Token = "tok"));
-        Assert.Equal("tok", OpenClickyConfiguration.Load(filePath, NoEnvironment).Token);
+        Assert.True(OpenClickyConfiguration.Update(filePath, settings => settings.Model = "tok"));
+        Assert.Equal("tok", OpenClickyConfiguration.Load(filePath, NoEnvironment).Model);
     }
 
     [Fact]
     public void TheFileUsesTheMacsKeyNames()
     {
-        var settings = new OpenClickyShellSettings { OpenaiApiKey = "o", XaiApiKey = "x", UseClaudeCodePlan = true, TokenExpiresAt = 12.5 };
+        var settings = new OpenClickyShellSettings { OpenaiApiKey = "o", XaiApiKey = "x", UseClaudeCodePlan = true };
         var jsonObject = JsonNode.Parse(settings.Encode())!.AsObject();
         Assert.Equal("o", (string?)jsonObject["openaiApiKey"]);
         Assert.Equal("x", (string?)jsonObject["xaiApiKey"]);
         Assert.True((bool?)jsonObject["useClaudeCodePlan"]);
-        Assert.Equal(12.5, (double?)jsonObject["tokenExpiresAt"]);
         Assert.False(jsonObject.ContainsKey("anthropicApiKey")); // null is left out, as Swift's encoder does
     }
 
@@ -255,19 +259,9 @@ public sealed class OpenClickyConfigurationTests : IDisposable
     }
 
     [Fact]
-    public void AuthorizeAddsTheBearerOnlyWithAToken()
-    {
-        var request = new HttpRequestMessage(HttpMethod.Get, "https://backend.test/billing/me");
-        OpenClickyConfiguration.Authorize(request, null);
-        Assert.False(request.Headers.Contains("Authorization"));
-        OpenClickyConfiguration.Authorize(request, "tok");
-        Assert.Equal("Bearer tok", request.Headers.GetValues("Authorization").Single());
-    }
-
-    [Fact]
     public void TheCredentialFingerprintNamesWhatALiveSessionDependsOn()
     {
-        var before = new OpenClickyShellSettings { Token = "a" };
+        var before = new OpenClickyShellSettings { OpenaiApiKey = "a" };
         var after = before.Clone();
         after.Model = "other";
         Assert.Equal(OpenClickyConfiguration.CredentialFingerprint(before), OpenClickyConfiguration.CredentialFingerprint(after));

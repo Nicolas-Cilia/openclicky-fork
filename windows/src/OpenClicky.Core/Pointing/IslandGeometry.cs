@@ -79,7 +79,6 @@ public sealed record IslandContentState(
     bool PermissionOffersTrustReset = false,
     bool TourHasStatus = false,
     bool TourHasMicrophoneName = false,
-    bool TourHasField = false,
     double? SlotHeight = null,
     /// <summary>The open island's width when the active component wants more than the standard (home's dashboard).</summary>
     double? SlotWidth = null,
@@ -137,7 +136,7 @@ public sealed class IslandLayout
         get
         {
             // A side drawer is narrower, so the copy wraps onto more lines.
-            var statusRoom = (State.TourHasStatus ? 38 : 0) + (State.TourHasMicrophoneName ? 20 : 0) + (State.TourHasField ? 38 : 0);
+            var statusRoom = (State.TourHasStatus ? 38 : 0) + (State.TourHasMicrophoneName ? 20 : 0);
             return CardTopInset + (Placement.IsSideDrawer() ? 168 : 116) + statusRoom;
         }
     }

@@ -21,9 +21,9 @@ import { fileURLToPath } from "node:url";
 
 const changelogPath = join(dirname(fileURLToPath(import.meta.url)), "..", "CHANGELOG.md");
 
-export const PLATFORMS = ["mac", "windows", "linux"];
-const PLATFORM_TITLES = { all: "All platforms", mac: "Mac", windows: "Windows", linux: "Linux" };
-const HEADING_TO_PLATFORM = { "all platforms": "all", everywhere: "all", mac: "mac", macos: "mac", windows: "windows", linux: "linux" };
+export const PLATFORMS = ["mac", "windows"];
+const PLATFORM_TITLES = { all: "All platforms", mac: "Mac", windows: "Windows" };
+const HEADING_TO_PLATFORM = { "all platforms": "all", everywhere: "all", mac: "mac", macos: "mac", windows: "windows" };
 
 export function sectionFor(changelog, version) {
   const lines = changelog.split(/\r?\n/);
@@ -37,10 +37,10 @@ export function sectionFor(changelog, version) {
   return lines.slice(start + 1, end).join("\n").trim();
 }
 
-// The section's text per platform ("all", "mac", "windows", "linux"), each trimmed; missing ones are "".
+// The section's text per platform ("all", "mac", "windows"), each trimmed; missing ones are "".
 // A "###" heading that names no platform is an error, so a typo can't quietly drop notes.
 export function splitByPlatform(section) {
-  const parts = { all: [], mac: [], windows: [], linux: [] };
+  const parts = { all: [], mac: [], windows: [] };
   let current = "all";
   for (const line of section.split("\n")) {
     const heading = /^###\s+(.*?)\s*$/.exec(line);
@@ -164,9 +164,6 @@ export function githubBody(section, { version, platforms, repo, build, commit, m
     rows.push(`| Windows 10 (2004 or later) or 11, x64 | ${download("OpenClicky.Windows-win-Setup.exe")} | ${windowsNote} |`);
     rows.push(`| Windows 10 (2004 or later) or 11, ARM64 | ${download("OpenClicky.Windows-win-arm64-Setup.exe")} | ${windowsNote} |`);
   }
-  if (shipped.includes("linux")) {
-    rows.push(`| Linux on X11 | ${download(`openclicky_linux-${version}-py3-none-any.whl`)} | Install with pip; see [OpenClicky on Linux](https://github.com/${repo}/blob/main/docs/linux.md). |`);
-  }
   out.push("## Downloads", "", "| System | File | Notes |", "| --- | --- | --- |", ...rows, "");
   const extras = [];
   if (shipped.includes("windows")) extras.push("The `Portable.zip` files run OpenClicky on Windows without installing it.");
@@ -211,7 +208,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       process.stdout.write(githubBody(notes, {
         version,
         platforms,
-        repo: option(args, "--repo") ?? process.env.GITHUB_REPOSITORY ?? "prasanthsasikumar/openclicky",
+        repo: option(args, "--repo") ?? process.env.GITHUB_REPOSITORY ?? "Nicolas-Cilia/openclicky-fork",
         build: git("rev-list", "--count", option(args, "--ref") ?? "HEAD"),
         commit: git("rev-parse", "--short", `${option(args, "--ref") ?? "HEAD"}^{commit}`),
         macSigning,

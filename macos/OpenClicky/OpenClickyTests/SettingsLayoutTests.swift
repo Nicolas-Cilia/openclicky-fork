@@ -16,6 +16,14 @@ struct SettingsLayoutTests {
         SettingsItem(id: id, section: section, title: id, view: AnyView(EmptyView()))
     }
 
+    /// A row the table doesn't name is never drawn, and nothing else says so.
+    @Test func theUsageAndAgentTaskRowsAreOnTheirPages() {
+        let arranged = SettingsLayout.arrange(["keys.usage.claudeCodePlan", "keys.usage.codexPlan", "privacy.agentSessions"].map { item($0) })
+        #expect(arranged.map(\.id) == ["keys.usage.claudeCodePlan", "keys.usage.codexPlan", "privacy.agentSessions"])
+        #expect(arranged.map(\.page) == [.keys, .keys, .privacy])
+        #expect(arranged.allSatisfy { $0.showsOnPage && !$0.isAdvanced })
+    }
+
     @Test func noRowIsPlacedTwice() {
         let allIDs = SettingsLayout.groups.flatMap(\.itemIDs)
         #expect(Set(allIDs).count == allIDs.count)

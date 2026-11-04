@@ -6,7 +6,7 @@
 //  missed). The Realtime model's own pixel guess is hundreds of pixels off for icons, but Claude
 //  locates an element on the same 1280 px screenshot to within a few pixels (measured ≤ 8 px on
 //  a "+" header button and a small "New" button, 2–4 s with Haiku 4.5), so the description the
-//  Realtime model gave is handed to Claude (an own Anthropic key, or the backend's /chat proxy) or,
+//  Realtime model gave is handed to Claude (an own Anthropic key) or,
 //  when another answer source is picked, to that source's AnswerProvider. The plans are skipped.
 //
 
@@ -30,14 +30,13 @@ nonisolated enum ScreenElementGrounder {
     /// (or only a plan), the request fails, or Claude answers [POINT:none]; app.log says when it
     /// could not ask.
     static func locate(label: String, text: String, userRequest: String?, in capture: CompanionScreenCapture) async -> Located? {
-        // Own Anthropic key: Claude at Anthropic directly; another answer key: its own provider;
-        // else the backend's /chat on the account (ClaudeAPI routes it).
+        // Own Anthropic key: Claude at Anthropic directly; another answer key: its own provider.
         if let reason = reasonGroundingCannotRun(on: await ProviderRouter.current(for: .claude)) {
             AppLog.append("point_at: no grounding (\(reason))")
             return nil
         }
         let imageSize = CGSize(width: capture.screenshotWidthInPixels, height: capture.screenshotHeightInPixels)
-        let api = await ClaudeAPI(proxyURL: "\(OpenClickyConfiguration.backendBaseURL)/chat", model: model)
+        let api = await ClaudeAPI(model: model)
         let reply: (text: String, duration: TimeInterval)
         do {
             reply = try await api.analyzeImage(
@@ -64,7 +63,7 @@ nonisolated enum ScreenElementGrounder {
             return "nothing is set up to answer"
         case .answerProvider(let source) where source == .claudeCodePlan || source == .codexPlan:
             return "\(source.displayName) is too slow to locate an element mid-sentence"
-        case .anthropicDirect, .backend, .openAIDirect, .answerProvider:
+        case .anthropicDirect, .openAIDirect, .answerProvider:
             return nil
         }
     }

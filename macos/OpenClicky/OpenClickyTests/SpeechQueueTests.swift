@@ -132,7 +132,7 @@ struct SpeechQueueTests {
         #expect(pointTags.isEmpty)
     }
 
-    // The agent's result arrives whole. It used to go out as one /tts request (which the backend
+    // The agent's result arrives whole. It used to go out as one voice request (which the voice
     // cuts at 400 characters) and nothing could stop it; now it is cut into pieces like an answer.
     @Test func aWholeAgentReplyIsSpokenInPiecesInOrder() async throws {
         let firstSentence = "done, i made the folder on your desktop and put the three reports in it."

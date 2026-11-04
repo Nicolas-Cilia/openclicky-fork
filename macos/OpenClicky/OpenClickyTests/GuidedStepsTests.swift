@@ -107,4 +107,35 @@ struct GuidedStepsTests {
         #expect(GuidedStepRules.nextStepRequest(forGoal: "turn on dark mode", clickCheck: .unknown) == plain)
         #expect(plain.hasPrefix(GuidedStepRules.nextStepRequestOpening))
     }
+
+    // MARK: Waiting for a spoken "continue"
+
+    @Test func whenTheGuideWaitsForContinueNoClickOrKeyFinishesAStep() {
+        for input in [GuidedStepInput.click, .stepKey, .otherKey] {
+            #expect(GuidedStepRules.reaction(to: input, askIsPending: false, advancesOnlyWhenTold: true) == .ignore)
+            #expect(GuidedStepRules.reaction(to: input, askIsPending: true, advancesOnlyWhenTold: true) == .ignore)
+        }
+    }
+
+    @Test func escStillEndsAGuideThatWaitsForContinue() {
+        #expect(GuidedStepRules.reaction(to: .escapeKey, askIsPending: false, advancesOnlyWhenTold: true) == .endGuide)
+    }
+
+    @Test func aGuideThatWaitsForContinueWaitsLongerBeforeGivingUp() {
+        #expect(GuidedStepRules.idleSecondsBeforeGivingUpWhileWaitingForContinue > GuidedStepRules.idleSecondsBeforeGivingUp)
+    }
+
+    @Test func continueAndItsShortCousinsMoveTheGuideOn() {
+        for spokenWords in ["continue", "Continue.", "okay, continue", "ok continue please", "next", "Next step!",
+                            "go on", "I'm done", "I’m ready", "what's next?", "done", "alright, keep going", "Clicky, continue"] {
+            #expect(GuidedStepContinuePhrase.isContinue(spokenWords), "\(spokenWords)")
+        }
+    }
+
+    @Test func aRealQuestionIsNotAContinue() {
+        for spokenWords in ["", "okay", "what does this button do", "what's the next tab over", "continue the email i was writing",
+                            "how do i get back to the previous step", "next to the save button what is that icon", "wait"] {
+            #expect(!GuidedStepContinuePhrase.isContinue(spokenWords), "\(spokenWords)")
+        }
+    }
 }

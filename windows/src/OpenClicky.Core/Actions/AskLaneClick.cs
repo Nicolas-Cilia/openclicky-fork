@@ -2,7 +2,7 @@
 //  AskLaneClick.cs
 //  OpenClicky (Windows only: the Mac clicks on the fast voice lane alone)
 //
-//  `click` on the ask lane. A free account has no fast voice, so hands-free and push-to-talk both
+//  `click` on the ask lane. Without an OpenAI or Gemini key there is no fast voice, so hands-free and push-to-talk both
 //  answer here, and "click the first result" could only point (2026-10-29, on the HP). Claude sees
 //  the whole screenshot and places the element the way it places a [POINT] tag, which counts as
 //  located (as the fast lane's grounder does since 5602681); the same refusals apply: words that

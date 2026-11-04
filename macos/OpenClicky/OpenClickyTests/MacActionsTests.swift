@@ -742,15 +742,15 @@ struct FastActionToolDefinitionTests {
     }
 
     /// A command is done, a question is taught, and email is never sent — in the Realtime prompt
-    /// and in the ask lane's quick-actions line (the plans and the free account).
+    /// and in the ask lane's quick-actions line (the plans).
     @Test func theInstructionsDoCommandsAndTeachQuestions() {
         let instructions = RealtimeVoiceClient.defaultInstructions
         for tool in ["minimize_all", "web_search", "play_music", "check_email", "draft_email"] { #expect(instructions.contains(tool)) }
         #expect(instructions.contains(CompanionManager.commandOrQuestionInstruction))
         #expect(CompanionManager.commandOrQuestionInstruction.contains("Do not explain how they could do it themselves"))
         #expect(CompanionManager.commandOrQuestionInstruction.contains("never send email"))
-        #expect(CompanionManager.accountToolsInstruction.contains(CompanionManager.commandOrQuestionInstruction))
-        #expect(CompanionManager.accountToolsInstruction.contains("check your email"))
+        #expect(CompanionManager.quickActionsInstruction.contains(CompanionManager.commandOrQuestionInstruction))
+        #expect(CompanionManager.quickActionsInstruction.contains("check your email"))
     }
 
     /// Nothing else keeps the schema's argument keys and `MacAction.parse`'s argument keys in

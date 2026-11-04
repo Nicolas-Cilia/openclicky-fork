@@ -157,7 +157,7 @@ public sealed class SarvamSpeechClientWire : ISarvamSpeechWire
 /// <summary>Sarvam's errors as SarvamSpeechError words them (the sessions throw the ones they detect themselves).</summary>
 public sealed class SarvamSpeechException(string message) : Exception(message)
 {
-    public static SarvamSpeechException NoKey() => new("sarvam needs your key. paste it under settings → account.");
+    public static SarvamSpeechException NoKey() => new("sarvam needs your key. paste it under settings → keys & plans.");
     public static SarvamSpeechException Refused(int status, string message) => new($"sarvam refused ({status}): {message}");
     public static SarvamSpeechException Unreachable(string reason) => new($"couldn't reach sarvam: {reason}");
 }

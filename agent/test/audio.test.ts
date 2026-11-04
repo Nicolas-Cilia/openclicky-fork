@@ -55,7 +55,7 @@ describe("transcribe", () => {
       let b = "";
       req.on("data", (d) => (b += d));
       req.on("end", () => {
-        seen.push({ url: req.url, auth: req.headers.authorization, body: JSON.parse(b) });
+        seen.push({ url: req.url, auth: req.headers.authorization, contentType: req.headers["content-type"], body: b });
         res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ text: "  create a file called hello.txt \n" }));
       });
     });
@@ -64,11 +64,13 @@ describe("transcribe", () => {
   });
   afterAll(() => server.close());
 
-  it("posts base64 audio to the backend and returns trimmed text", async () => {
+  it("uploads the audio to OpenAI on the own key and returns trimmed text", async () => {
     const wav = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "oc-aud-")), "a.wav");
     fs.writeFileSync(wav, "RIFFdata");
-    const text = await transcribe(resolveConfig({ backendUrl: url, token: "tok" }), wav, { language: "en" });
+    const text = await transcribe(resolveConfig({ openaiBaseUrl: `${url}/v1`, openaiApiKey: "tok" }), wav, { language: "en" });
     expect(text).toBe("create a file called hello.txt");
-    expect(seen.at(-1)).toMatchObject({ url: "/agent/transcribe", auth: "Bearer tok", body: { audio: Buffer.from("RIFFdata").toString("base64"), mime: "audio/wav", language: "en" } });
+    expect(seen.at(-1)).toMatchObject({ url: "/v1/audio/transcriptions", auth: "Bearer tok", contentType: expect.stringContaining("multipart/form-data") });
+    expect(seen.at(-1).body).toContain("RIFFdata");
+    expect(seen.at(-1).body).toContain("gpt-4o-mini-transcribe");
   });
 });

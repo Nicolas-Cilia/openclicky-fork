@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Rebuilds a GitHub release's page from CHANGELOG.md for the platforms whose files are attached to it:
-# what's new by platform, then a downloads table. The windows-release and linux-release workflows run
+# what's new by platform, then a downloads table. The windows-release workflow runs
 # it after they upload, so a platform's notes and download rows appear when its files do.
 #
 #   scripts/update-release-page.sh v0.10.0 [--windows-signed]
@@ -11,7 +11,7 @@ set -euo pipefail
 
 TAG="${1:?usage: update-release-page.sh <tag> [--windows-signed]}"
 shift
-REPO="${GITHUB_REPOSITORY:-prasanthsasikumar/openclicky}"
+REPO="${GITHUB_REPOSITORY:-Nicolas-Cilia/openclicky-fork}"
 VERSION="${TAG#v}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -19,7 +19,6 @@ ASSETS="$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].na
 PLATFORMS=()
 grep -qx "OpenClicky-$VERSION.dmg" <<<"$ASSETS" && PLATFORMS+=(mac)
 grep -q '^OpenClicky\.Windows-.*Setup\.exe$' <<<"$ASSETS" && PLATFORMS+=(windows)
-grep -q '^openclicky_linux-.*\.whl$' <<<"$ASSETS" && PLATFORMS+=(linux)
 if [[ ${#PLATFORMS[@]} -eq 0 ]]; then
   echo "no platform files attached to $TAG yet; leaving its page alone" >&2
   exit 0

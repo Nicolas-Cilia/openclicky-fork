@@ -28,24 +28,19 @@ enum DictationEngineResolver {
             return ParakeetTranscriptionProvider()
         case .sarvam:
             return SarvamTranscriptionProvider(language: { settings.language })
-        case .openclicky:
+        case .openAI:
             // The styles page's language, read when a take starts; auto sends none so the model detects it.
             return OpenAIAudioTranscriptionProvider(language: { settings.language.bareCode })
-        case .assemblyai:
-            return AssemblyAIStreamingTranscriptionProvider(language: { settings.language.bareCode })
         }
     }
 
     /// Nil when the engine can be used; otherwise one line saying what is missing.
     static func unavailableReason(for choice: DictationEngineChoice) -> String? {
-        unavailableReason(for: choice, kind: AccountCapabilities.current().kind, isConfigured: OpenClickyConfiguration.isConfigured,
-                          signedIn: OpenClickyConfiguration.hasAccountToken, sarvamKey: OpenClickyConfiguration.settings.sarvamKey)
+        unavailableReason(for: choice, hasOpenAIKey: ProviderCapabilities.current().hasOwnOpenAIKey, sarvamKey: OpenClickyConfiguration.settings.sarvamKey)
     }
 
-    /// The backend engines hear through OpenAI (/agent/transcribe, or OpenAI itself on an own key) and
-    /// AssemblyAI (/transcribe-token, minted on OpenClicky's key: account only), neither of which a
-    /// free account's grant covers.
-    static func unavailableReason(for choice: DictationEngineChoice, kind: AccountKind, isConfigured: Bool, signedIn: Bool, sarvamKey: String?,
+    /// OpenAI hears on the person's own key.
+    static func unavailableReason(for choice: DictationEngineChoice, hasOpenAIKey: Bool, sarvamKey: String?,
                                   parakeetInstalled: Bool = ParakeetDictation.isInstalled,
                                   bareLanguageCode: String? = DictationSettings.storedLanguage().bareCode) -> String? {
         switch choice {
@@ -55,11 +50,8 @@ enum DictationEngineResolver {
             return parakeetUnavailableReason(isInstalled: parakeetInstalled, bareLanguageCode: bareLanguageCode)
         case .sarvam:
             return sarvamUnavailableReason(sarvamKey: sarvamKey)
-        case .openclicky, .assemblyai:
-            guard isConfigured else { return "needs an openclicky account or your openai key" }
-            if kind == .account { return "needs your own key" }
-            if choice == .assemblyai && !signedIn { return "needs an openclicky account: assemblyai runs on openclicky's key" }
-            return nil
+        case .openAI:
+            return hasOpenAIKey ? nil : "needs your own openai key"
         }
     }
 
@@ -81,12 +73,11 @@ enum DictationEngineResolver {
 
     /// The ways to get a model, for a Hey Clicky edit or a history question asked with none set up.
     /// Apple's model comes first because it is free and needs nothing but the Mac.
-    static let howToGetAModelSentence = "apple intelligence on this mac, one of your own keys (settings → account), or an openclicky account"
+    static let howToGetAModelSentence = "apple intelligence on this mac, or one of your own keys (settings → keys & plans)"
 
     /// The model that polishes takes and answers Hey Clicky: Apple's on-device model where the Mac
     /// has it, else Sarvam with a key, else the person's
-    /// own OpenAI, Anthropic, Groq, Gemini, Mistral, OpenRouter or xAI key, else the backend with
-    /// an account, else none.
+    /// own OpenAI, Anthropic, Groq, Gemini, Mistral, OpenRouter or xAI key, else none.
     static func makePolisher() -> (any TakePolisher)? {
         // Apple's on-device model first: free, private and already on the Mac where it exists.
         #if canImport(FoundationModels)
@@ -96,19 +87,12 @@ enum DictationEngineResolver {
         #endif
         let sarvamKey = OpenClickyConfiguration.settings.sarvamKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !sarvamKey.isEmpty { return SarvamTakePolisher(client: SarvamSpeechClient(key: sarvamKey)) }
-        // Own keys first: an OpenAI key polishes on OpenAI (BackendTakePolisher routes it there),
-        // an Anthropic key alone polishes on Claude Haiku at Anthropic, any other answer key on its
-        // own vendor. No account needed for any of them.
+        // An OpenAI key polishes on OpenAI, an Anthropic key alone on Claude Haiku at Anthropic, any
+        // other answer key on its own vendor. A plan's CLI starts too slowly to tidy a take.
         let credentials = ProviderRouter.currentCredentials()
-        if credentials.openAIKey == nil {
-            if let anthropicKey = credentials.anthropicKey { return AnthropicTakePolisher(anthropicKey: anthropicKey) }
-            if let answerKeyPolisher = AnswerKeyTakePolisher.firstAvailable(credentials: credentials) { return answerKeyPolisher }
-        }
-        switch AccountCapabilities.current().kind {
-        case .account: return AccountTakePolisher()
-        case .ownKeys: return BackendTakePolisher()
-        case .signedOut: return nil
-        }
+        if credentials.openAIKey != nil { return OpenAITakePolisher() }
+        if let anthropicKey = credentials.anthropicKey { return AnthropicTakePolisher(anthropicKey: anthropicKey) }
+        return AnswerKeyTakePolisher.firstAvailable(credentials: credentials)
     }
 
     /// Whether a take's words may go to a model: the switch, and — for the offline engine, whose

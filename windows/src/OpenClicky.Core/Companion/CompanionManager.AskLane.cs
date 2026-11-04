@@ -22,8 +22,6 @@ public sealed partial class CompanionManager
 {
     /// <summary>Conversation history so Claude remembers prior exchanges within a session.</summary>
     private readonly List<(string UserTranscript, string AssistantResponse)> conversationHistory = [];
-    /// <summary>Account notices already spoken this session: each is said once, then the lane falls back silently.</summary>
-    private readonly HashSet<string> spokenAccountNotices = new(StringComparer.Ordinal);
     /// <summary>The last question sent down the ask lane and when: the same one again soon after means the
     /// answer missed what they meant (RepeatedQuestion).</summary>
     private (string Transcript, DateTimeOffset AskedAt)? lastAskQuestion;
@@ -146,7 +144,7 @@ public sealed partial class CompanionManager
             ShowAskCaption($"“{transcript}” · thinking…", 30);
         }
         // Captured after the pause, so what is sent is what is on screen now.
-        // Every screen (an account sends at most two), told apart from a backend failure.
+        // Every screen, told apart from a failure to answer.
         IReadOnlyList<CompanionScreenCapture> allScreenCaptures;
         try
         {
@@ -157,14 +155,15 @@ public sealed partial class CompanionManager
             throw new AskScreenCaptureException(error);
         }
         if (allScreenCaptures.Count == 0) throw new AskScreenCaptureException(new InvalidOperationException("no screen was captured"));
-        var screenCaptures = ScreensForAsk(allScreenCaptures, AccountCapabilities.Current());
+        var screenCaptures = ScreensForAsk(allScreenCaptures);
         cancellationToken.ThrowIfCancellationRequested();
 
         // Two-tier routing: the gate decides whether this is a quick question (the ask lane below) or
-        // real work (the agent lane). The agent lane needs the openclicky tool; without it the quick
-        // actions are offered to whoever answers instead.
+        // real work (the agent lane). The agent lane needs the openclicky tool, which may still be
+        // waiting for Node (AgentTool); meanwhile the quick actions are offered to whoever answers.
         var agentLaneRuns = IsAgentModeEnabled && OpenClickyConfiguration.IsConfigured
-            && AccountCapabilities.Current().UsesAgent && openClickyAgentClient.IsToolInstalled;
+            && ProviderCapabilities.Current().UsesAgent && openClickyAgentClient.IsToolInstalled;
+        if (ProviderCapabilities.Current().UsesAgent && !openClickyAgentClient.IsToolInstalled) _ = openClickyAgentClient.DownloadNodeIfNeededAsync();
         if (agentLaneRuns)
         {
             AgentActivityText = "deciding…";
@@ -216,7 +215,7 @@ public sealed partial class CompanionManager
         IReadOnlyList<System.Text.Json.Nodes.JsonObject> askTools =
         [
             .. AskLanePrompts.AskTools(offersQuickActions, writingTarget is not null, DesktopAction.AnthropicToolDefinitions()),
-            // Windows only: with no fast voice (a free account), "click the first link" is answered here.
+            // Windows only: with no fast voice, "click the first link" is answered here.
             .. offersQuickActions ? [AskLaneClick.AnthropicToolDefinition()] : Array.Empty<System.Text.Json.Nodes.JsonObject>(),
             .. teacherIsOn ? TeacherPlugin.AnthropicToolDefinitions() : [],
         ];
@@ -304,7 +303,7 @@ public sealed partial class CompanionManager
                     toolOutcomes.Add(badArguments.Outcome.SpokenSentence);
                     break;
                 default:
-                    toolOutcomes.Add(AccountLimitError.NotOnPlan.Message());
+                    toolOutcomes.Add(AgentNeedsSetupSentence);
                     break;
             }
         }
@@ -351,9 +350,6 @@ public sealed partial class CompanionManager
             TeacherPlugin.WriteAnswerIfTheyCannotHear(spokenText, lastQuestionWasTyped, cursorCapture);
             if (replyIsAGuidedStep) WaitForTheGuidedStepToBeDone();
         }
-
-        // An answer spent some of the allowance: the profile store notices crossing 80%.
-        if (AccountCapabilities.Current().Kind == AccountKind.Account) AccountProfileStore.Shared.Refresh();
 
         // Wait for the voice to finish; a question asked meanwhile cancels the playback too.
         try
@@ -405,18 +401,6 @@ public sealed partial class CompanionManager
             // Not an outage: nothing is set up to answer yet. Said in text beside the pointer.
             ShowAskCaption(unavailable.Sentence, 8);
         }
-        else if (error is BackendSignInException signInError)
-        {
-            SpeakWithSystemVoice(OpenClickyAuthSession.SpokenSentence(signInError.Error));
-        }
-        else if (AskLaneFailures.RefusedQuestion(error) is { Status: 401 } refusal)
-        {
-            SpeakWithSystemVoice(await OpenClickyAuthSession.Shared.SentenceAfterBackendRejectionAsync(refusal.Body));
-        }
-        else if (IsAccountNotice(error))
-        {
-            if (AccountNoticeToSpeak(error, spokenAccountNotices) is { } notice) SpeakWithSystemVoice(notice);
-        }
         else
         {
             SpeakWithSystemVoice(AskLaneFailures.AskFailureSentence(error));
@@ -427,11 +411,10 @@ public sealed partial class CompanionManager
 
     private StreamingAnswerSpeaker MakeAnswerSpeaker(Action onVoiceStarts, Action<string> onPointTag)
     {
-        // One session per answer, so a late or failed free voice hands the rest of this answer to the local voice
-        // and the next answer tries again (AccountVoiceGuard.cs).
-        var answerVoiceSession = answerVoicePlayer.MakeAnswerSession();
+        // One fetcher per answer, so an answer stays in one voice.
+        var fetchAnswerAudio = answerVoicePlayer.MakeAnswerFetcher();
         return new(new SpeechQueue(
-                answerVoiceSession.AudioAsync,
+                (pieceText, cancellationToken) => fetchAnswerAudio(pieceText, cancellationToken),
                 (audio, cancellationToken) => answerVoicePlayer.PlayToCompletionAsync(audio, cancellationToken)),
             onVoiceStarts: () => services.MainThread.Post(onVoiceStarts),
             onPointTag: pointTag => services.MainThread.Post(() => onPointTag(pointTag)));
@@ -559,8 +542,11 @@ public sealed partial class CompanionManager
     }
 
     /// <summary>Spoken when the agent lane fails (the synthesizer every new question stops).</summary>
-    private void SpeakCreditsErrorFallback() =>
-        SpeakWithSystemVoice("something went wrong talking to the openclicky backend. check the backend and your token in the settings file.");
+    private void SpeakAgentErrorFallback() =>
+        SpeakWithSystemVoice(ProviderCapabilities.Current().AgentPausedSentence
+            ?? "something went wrong running that task. check that codex is signed in, then try again.");
+
+    public const string AgentNeedsSetupSentence = "that needs an agent. switch on codex in settings, keys & plans, or add your own openai key.";
 
     // MARK: - Guided steps
 
@@ -730,35 +716,7 @@ public sealed partial class CompanionManager
     public static (byte[] Data, string Label) ImageLabeledWithItsPixelSize(CompanionScreenCapture capture) =>
         (capture.ImageData, AskLanePrompts.ImageLabelWithItsPixelSize(capture.Label, capture.ScreenshotWidthInPixels, capture.ScreenshotHeightInPixels));
 
-    /// <summary>The screens a question carries: the cursor's screen first, and for an account at most one other.</summary>
-    public static IReadOnlyList<CompanionScreenCapture> ScreensForAsk(IReadOnlyList<CompanionScreenCapture> captures, AccountCapabilities capabilities)
-    {
-        var cursorFirst = captures.Where(capture => capture.IsCursorScreen).Concat(captures.Where(capture => !capture.IsCursorScreen)).ToList();
-        return capabilities.MaxAskScreens is { } limit ? cursorFirst.Take(limit).ToList() : cursorFirst;
-    }
-
-    /// <summary>The plain sentence for an account limit, when the ask lane's Claude call answered 402.</summary>
-    public static string? LimitSentence(Exception error)
-    {
-        if (AskLaneFailures.RefusedQuestion(error) is not { Status: 402 } refusal) return null;
-        var message = AccountLimitErrors.From(402, refusal.Body)?.Message() ?? "";
-        return message.Length == 0 ? AccountLimitError.PersonalLimit.Message() : message;
-    }
-
-    /// <summary>The account's answer to a failed ask: a 402 limit, or the free service's 503 trouble.</summary>
-    public static bool IsAccountNotice(Exception error) =>
-        AskLaneFailures.RefusedQuestion(error) is { } refusal && (refusal.Status == 402 || IsServiceTrouble(refusal));
-
-    /// <summary>The sentence for an account notice the first time this session; null afterwards.</summary>
-    public static string? AccountNoticeToSpeak(Exception error, ISet<string> alreadySpoken)
-    {
-        var sentence = AskLaneFailures.RefusedQuestion(error) is { } refusal && IsServiceTrouble(refusal)
-            ? AccountLimitErrors.ServiceTroubleMessage
-            : LimitSentence(error);
-        if (sentence is null || !alreadySpoken.Add(sentence)) return null;
-        return sentence;
-    }
-
-    private static bool IsServiceTrouble(BackendHttpException refusal) =>
-        refusal.Status == 503 && AccountLimitErrors.IsServiceTrouble(refusal.Status, refusal.Body);
+    /// <summary>The screens a question carries: the cursor's screen first.</summary>
+    public static IReadOnlyList<CompanionScreenCapture> ScreensForAsk(IReadOnlyList<CompanionScreenCapture> captures) =>
+        captures.Where(capture => capture.IsCursorScreen).Concat(captures.Where(capture => !capture.IsCursorScreen)).ToList();
 }

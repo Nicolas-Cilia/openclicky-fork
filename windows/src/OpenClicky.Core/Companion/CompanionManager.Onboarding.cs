@@ -18,7 +18,7 @@ public sealed partial class CompanionManager
     }
 
     /// <summary>The model that downloads on its own once the welcome tour is done: Parakeet's hearing. Kokoro waits to be
-    /// picked in Settings: account answers speak with the free ElevenLabs voice (#23).</summary>
+    /// picked in Settings.</summary>
     public void StartAutomaticModelDownloads(bool tourIsFinished)
     {
         ParakeetDictation.Shared?.StartAutomaticSetup(tourIsFinished, DictationSettings);

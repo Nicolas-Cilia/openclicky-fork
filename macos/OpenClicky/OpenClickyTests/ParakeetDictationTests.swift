@@ -26,12 +26,12 @@ struct ParakeetDictationTests {
     @Test func anAutomaticDownloadReplacesOnlyTheOldOfflineEngine() {
         #expect(ParakeetDictation.engineAfterAutomaticDownload(current: .offline) == .parakeet)
         #expect(ParakeetDictation.engineAfterAutomaticDownload(current: .sarvam) == .sarvam)
-        #expect(ParakeetDictation.engineAfterAutomaticDownload(current: .openclicky) == .openclicky)
+        #expect(ParakeetDictation.engineAfterAutomaticDownload(current: .openAI) == .openAI)
     }
 
     @Test func theEngineSaysWhatItNeeds() {
         func reason(installed: Bool, language: String?) -> String? {
-            DictationEngineResolver.unavailableReason(for: .parakeet, kind: .signedOut, isConfigured: false, signedIn: false, sarvamKey: nil,
+            DictationEngineResolver.unavailableReason(for: .parakeet, hasOpenAIKey: false, sarvamKey: nil,
                                                       parakeetInstalled: installed, bareLanguageCode: language)
         }
         #expect(reason(installed: true, language: nil) == nil)

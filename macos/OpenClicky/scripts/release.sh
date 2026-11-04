@@ -5,16 +5,20 @@
 #   scripts/release.sh                 # build + sign + install to /Applications (no GitHub release)
 #   scripts/release.sh --publish       # ...and tag + create a GitHub release with the zip and dmg
 #   scripts/release.sh --version 0.3.0 # override the version (default: VERSION file)
-#   scripts/release.sh --dev           # Apple Development signing, no notarization (ignores release.env)
+#   scripts/release.sh --dev           # ad hoc signing, no notarization (ignores release.env)
 #   scripts/release.sh --no-notarize   # Developer ID signing, no notarization — a fast local install
 #                                      # that keeps the installed app's signature (and its TCC grants)
 #
-# Signing (in priority order):
-#   OPENCLICKY_SIGN_IDENTITY  e.g. "Developer ID Application: Your Org (TEAMID)" — distribution builds
-#   default                   "Apple Development" with OPENCLICKY_TEAM_ID (runs on this Mac; other Macs
-#                             must right-click → Open, since it is not notarized)
+# Signing:
+#   default                   the self-signed "OpenClicky Self-Signed" certificate from
+#                             scripts/setup-release-keys.sh. Its signature stays the same across
+#                             builds, so an update keeps macOS's Accessibility, Screen Recording and
+#                             Microphone permissions. Without the certificate the build is ad hoc and
+#                             macOS asks for those again after each update.
+#   OPENCLICKY_SIGN_IDENTITY  e.g. "Developer ID Application: Your Org (TEAMID)", if you ever have one.
 # Notarization (Developer ID only): set OPENCLICKY_NOTARY_PROFILE to a `xcrun notarytool store-credentials`
-# profile name and the dmg/zip are notarized and stapled.
+# profile name and the dmg/zip are notarized and stapled. A self-signed app is not notarized: the first
+# install on each Mac needs right-click → Open (System Settings → Privacy & Security on newer macOS).
 #
 set -euo pipefail
 
@@ -36,10 +40,11 @@ BUILD_DIR="$APP_DIR/build"
 DERIVED_DATA="$BUILD_DIR/DerivedData"
 EXPORT_DIR="$BUILD_DIR/export"
 INSTALL_DIR="${OPENCLICKY_INSTALL_DIR:-/Applications}"
-TEAM_ID="${OPENCLICKY_TEAM_ID:-3U4384584Z}"
-SIGN_IDENTITY="${OPENCLICKY_SIGN_IDENTITY:-Apple Development}"
+TEAM_ID="${OPENCLICKY_TEAM_ID:-}"
+SELF_SIGNED_NAME="OpenClicky Self-Signed"
+SIGN_IDENTITY="${OPENCLICKY_SIGN_IDENTITY:-$SELF_SIGNED_NAME}"
 NOTARY_PROFILE="${OPENCLICKY_NOTARY_PROFILE:-}"
-GITHUB_REPO="${OPENCLICKY_GITHUB_REPO:-prasanthsasikumar/openclicky}"
+GITHUB_REPO="${OPENCLICKY_GITHUB_REPO:-Nicolas-Cilia/openclicky-fork}"
 
 PUBLISH=0
 VERSION="$(tr -d '[:space:]' < "$APP_DIR/VERSION")"
@@ -48,7 +53,7 @@ while [[ $# -gt 0 ]]; do
     --publish) PUBLISH=1 ;;
     --version) VERSION="$2"; shift ;;
     --no-install) INSTALL_DIR="" ;;
-    --dev) SIGN_IDENTITY="Apple Development"; NOTARY_PROFILE="" ;;
+    --dev) SIGN_IDENTITY="-"; NOTARY_PROFILE="" ;;
     # Notarization only matters for other Macs (Gatekeeper). Skipping it keeps the Developer ID
     # signature, so the installed app's Accessibility/Screen Recording grants stay valid — the whole
     # reason to prefer this over --dev when reinstalling over an existing copy.
@@ -83,6 +88,13 @@ fi
 # builds at random, so Xcode signs without one and every piece of code is re-signed below with a
 # timestamp, retrying on a timestamp-server hiccup.
 CODE_SIGN_FLAGS=""
+# The self-signed certificate, unless someone set another identity; ad hoc when it isn't installed yet.
+if [[ "$SIGN_IDENTITY" == "$SELF_SIGNED_NAME" ]] && ! security find-certificate -c "$SELF_SIGNED_NAME" >/dev/null 2>&1; then
+  echo "▸ no '$SELF_SIGNED_NAME' certificate (scripts/setup-release-keys.sh): signing ad hoc, so macOS will ask for permissions again after an update" >&2
+  SIGN_IDENTITY="-"
+fi
+SELF_MANAGED_SIGNING=0
+[[ "$SIGN_IDENTITY" == "-" || "$SIGN_IDENTITY" == "$SELF_SIGNED_NAME" ]] && SELF_MANAGED_SIGNING=1
 # Developer ID needs manual signing: Xcode rejects an explicit Developer ID identity under automatic
 # signing ("conflicting provisioning settings"). Development builds stay automatic.
 CODE_SIGN_STYLE="Automatic"
@@ -116,6 +128,10 @@ echo "▸ OpenClicky $VERSION (build $BUILD_NUMBER, $COMMIT) — signing as '$SI
 rm -rf "$EXPORT_DIR"
 mkdir -p "$EXPORT_DIR"
 
+# The tool agent tasks run through ships inside the app (scripts/embed-agent-tool.sh).
+echo "▸ building the agent tool"
+(cd "$APP_DIR/../.." && npm run build --silent -w agent)
+
 # 1. Build a Release app, signed. Signing here (not in an archive/export step) keeps the script
 #    dependency-free; hardened runtime is on so a Developer ID build can be notarized as-is.
 xcodebuild \
@@ -131,10 +147,10 @@ xcodebuild \
   MARKETING_VERSION="$VERSION" \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
   DEVELOPMENT_TEAM="$TEAM_ID" \
-  CODE_SIGN_STYLE="$CODE_SIGN_STYLE" \
-  CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
+  CODE_SIGN_STYLE="$([[ $SELF_MANAGED_SIGNING -eq 1 ]] && echo Manual || echo "$CODE_SIGN_STYLE")" \
+  CODE_SIGN_IDENTITY="$([[ $SELF_MANAGED_SIGNING -eq 1 ]] && echo - || echo "$SIGN_IDENTITY")" \
   PROVISIONING_PROFILE_SPECIFIER="" \
-  ENABLE_HARDENED_RUNTIME=YES \
+  ENABLE_HARDENED_RUNTIME="$([[ $SELF_MANAGED_SIGNING -eq 1 ]] && echo NO || echo YES)" \
   OTHER_CODE_SIGN_FLAGS="$CODE_SIGN_FLAGS" \
   CODE_SIGN_INJECT_BASE_ENTITLEMENTS="$INJECT_BASE_ENTITLEMENTS" \
   -quiet
@@ -174,6 +190,26 @@ if [[ "$SIGN_IDENTITY" == Developer\ ID* ]]; then
   done
   sign_with_timestamp --entitlements "$APP_DIR/OpenClicky/OpenClicky.entitlements" --sign "$SIGN_IDENTITY" "$APP_PATH"
 fi
+
+# Self-signed or ad hoc: everything nested gets the same identity, inside-out. No hardened runtime:
+# its library validation refuses frameworks from a certificate with no Apple team.
+if [[ $SELF_MANAGED_SIGNING -eq 1 ]]; then
+  echo "▸ signing with '$SIGN_IDENTITY'"
+  SPARKLE="$APP_PATH/Contents/Frameworks/Sparkle.framework"
+  for nested in \
+    "$SPARKLE/Versions/B/XPCServices/Installer.xpc" \
+    "$SPARKLE/Versions/B/XPCServices/Downloader.xpc" \
+    "$SPARKLE/Versions/B/Autoupdate" \
+    "$SPARKLE/Versions/B/Updater.app" \
+    "$SPARKLE" \
+    "$APP_PATH/Contents/Frameworks/libsherpa-onnx-c-api.dylib" \
+    "$APP_PATH/Contents/Frameworks/libonnxruntime.dylib"; do
+    [[ -e "$nested" ]] && codesign --force --timestamp=none --sign "$SIGN_IDENTITY" "$nested"
+  done
+  codesign --force --timestamp=none --entitlements "$APP_DIR/OpenClicky/OpenClicky.entitlements" --sign "$SIGN_IDENTITY" "$APP_PATH"
+fi
+
+[[ -f "$APP_PATH/Contents/Resources/agent-tool/agent/dist/cli.js" ]] || { echo "the agent tool isn't in the app" >&2; exit 1; }
 
 echo "▸ verifying signature"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
@@ -259,9 +295,9 @@ if [[ $PUBLISH -eq 1 ]]; then
     git -C "$REPO_DIR" push -q origin "$TAG"
   fi
   # The page lists what's new by platform and a downloads table. Only the Mac is attached here; the
-  # windows-release and linux-release workflows rebuild the page when they attach theirs.
+  # windows-release workflow rebuilds the page when it attaches its files.
   NOTES_FILE="$EXPORT_DIR/notes.md"
-  if [[ "$SIGN_IDENTITY" == Apple\ Development* ]]; then
+  if [[ $SELF_MANAGED_SIGNING -eq 1 ]]; then
     MAC_SIGNING="development"
   elif [[ -n "$NOTARY_PROFILE" ]]; then
     MAC_SIGNING="notarized"
@@ -269,7 +305,11 @@ if [[ $PUBLISH -eq 1 ]]; then
     MAC_SIGNING="developer-id"
   fi
   node "$NOTES_SCRIPT" github "$VERSION" --platforms mac --mac-signing "$MAC_SIGNING" --repo "$GITHUB_REPO" > "$NOTES_FILE"
-  RELEASE_ASSETS=("$ZIP_PATH" "$DMG_PATH")
+  # A name that never changes, so https://github.com/<repo>/releases/latest/download/OpenClicky.dmg
+  # is always the newest build (the README's download button).
+  LATEST_DMG_PATH="$EXPORT_DIR/$APP_NAME.dmg"
+  cp "$DMG_PATH" "$LATEST_DMG_PATH"
+  RELEASE_ASSETS=("$ZIP_PATH" "$DMG_PATH" "$LATEST_DMG_PATH")
   [[ -n "$APPCAST_PATH" ]] && RELEASE_ASSETS+=("$APPCAST_PATH")
   if gh release view "$TAG" --repo "$GITHUB_REPO" >/dev/null 2>&1; then
     gh release upload "$TAG" "${RELEASE_ASSETS[@]}" --repo "$GITHUB_REPO" --clobber
@@ -277,10 +317,5 @@ if [[ $PUBLISH -eq 1 ]]; then
     gh release create "$TAG" "${RELEASE_ASSETS[@]}" --repo "$GITHUB_REPO" --title "OpenClicky $VERSION" --notes-file "$NOTES_FILE"
   fi
   gh release view "$TAG" --repo "$GITHUB_REPO" --json url --jq .url
-  # The Homebrew cask (flowsxr/homebrew-tap) installs and checks the new dmg, then bumps
-  # itself; this only starts it now instead of at its next six-hourly run.
-  gh workflow run bump-openclicky.yml --repo flowsxr/homebrew-tap >/dev/null 2>&1 \
-    && echo "▸ Homebrew cask update started" \
-    || echo "▸ Homebrew cask update not started; it runs on its own within six hours"
 fi
 echo "▸ done"

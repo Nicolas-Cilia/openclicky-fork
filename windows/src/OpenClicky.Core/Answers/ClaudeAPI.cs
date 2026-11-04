@@ -1,8 +1,7 @@
 // Port of macos/OpenClicky/OpenClicky/ClaudeAPI.swift
 //
 // Claude API helper with streaming for progressive text display. The person's own Anthropic key
-// goes straight to Anthropic with the same Messages body /chat relays; without one, the backend's
-// /chat on the account's token (ProviderRouter). Another answer source (an OpenAI-compatible key,
+// goes straight to Anthropic (ProviderRouter). Another answer source (an OpenAI-compatible key,
 // Gemini, a Claude Code or Codex plan) gets the same question through its IAnswerProvider.
 //
 // Windows notes: the Mac's own URLSession (default config, no cache, TLS tickets kept) is the
@@ -44,45 +43,25 @@ public sealed class ClaudeAPI
     private static readonly object TlsWarmupLock = new();
     private static bool hasStartedTlsWarmup;
 
-    /// <summary>
-    /// The /chat URL, read for every request so a backend changed in shell.json while the app runs
-    /// is used by the next question (it was fixed when the client was built).
-    /// </summary>
-    private readonly Func<string> currentProxyUrl;
     private readonly Func<ProviderCredentials>? credentialsOverride;
-    private readonly BackendSignIn.SignInRejectionHandling? signIn;
+    private readonly PlanLimitStore planLimits;
     private readonly AnswerProviderMaker makeAnswerProvider;
 
-    public Uri ApiUrl => ResolvedApiUrl(currentProxyUrl());
     public string Model { get; set; }
 
-    /// <summary>
-    /// `proxyUrl` is built from the user-configurable backend URL (shell.json or an environment
-    /// override), not a compile-time literal, so a malformed value falls back to the hosted
-    /// backend's own /chat endpoint instead of failing every question.
-    /// </summary>
-    public static Uri ResolvedApiUrl(string proxyUrl) =>
-        Uri.TryCreate(proxyUrl, UriKind.Absolute, out var url) && (url.Scheme == Uri.UriSchemeHttps || url.Scheme == Uri.UriSchemeHttp)
-            ? url
-            : new Uri($"{OpenClickyConfiguration.HostedBackendUrl}/chat");
-
-    public ClaudeAPI(string proxyUrl, string model = DefaultModel) : this(() => proxyUrl, model) { }
-
-    /// <param name="currentProxyUrl">The backend's /chat URL, read for every request.</param>
-    /// <param name="currentCredentials">The keys and token; null reads shell.json each time (and logs route changes).</param>
-    /// <param name="signIn">How a refused sign-in is renewed; null is the live session.</param>
+    /// <param name="currentCredentials">The keys; null reads shell.json each time (and logs route changes).</param>
+    /// <param name="planLimits">Where a plan running out is noted; null is the app's own store.</param>
     /// <param name="makeAnswerProvider">The provider for another answer source; null is AnswerProviderFactory with shell.json's `answerModels`.</param>
     /// <param name="warmUpConnection">Open the connection to the next question's host now (once per app run).</param>
-    public ClaudeAPI(Func<string> currentProxyUrl, string model = DefaultModel,
+    public ClaudeAPI(string model = DefaultModel,
                      Func<ProviderCredentials>? currentCredentials = null,
-                     BackendSignIn.SignInRejectionHandling? signIn = null,
+                     PlanLimitStore? planLimits = null,
                      AnswerProviderMaker? makeAnswerProvider = null,
                      bool warmUpConnection = true)
     {
-        this.currentProxyUrl = currentProxyUrl;
         Model = model;
         credentialsOverride = currentCredentials;
-        this.signIn = signIn;
+        this.planLimits = planLimits ?? PlanLimitStore.Shared;
         this.makeAnswerProvider = makeAnswerProvider ?? ((source, credentials, cancellationToken) =>
             AnswerProviderFactory.MakeAsync(source, credentials, OpenClickyConfiguration.Settings.AnswerModels ?? [], cancellationToken: cancellationToken));
         // Fire a lightweight HEAD request in the background to pre-establish the TLS connection,
@@ -96,43 +75,26 @@ public sealed class ClaudeAPI
     private ProviderRoute CurrentRoute() =>
         credentialsOverride is null ? ProviderRouter.Current(ProviderCapability.Claude) : ProviderRouter.Route(ProviderCapability.Claude, credentialsOverride());
 
-    /// <summary>
-    /// The person's own Anthropic key goes straight to Anthropic with the same Messages body /chat
-    /// relays; without one, the backend's /chat on the account's token (`ProviderRouter`).
-    /// `GoesToBackend` says the request carries the account's token, so a 401 is the sign-in's
-    /// and goes through `BackendSignIn` (refresh once, send again).
-    /// </summary>
-    private (HttpRequestMessage Request, bool GoesToBackend) MakeApiRequest(ProviderRoute route, ProviderCredentials credentials, JsonObject body)
+    /// <summary>The person's own Anthropic key goes straight to Anthropic (`ProviderRouter`).</summary>
+    private static HttpRequestMessage MakeApiRequest(ProviderRoute route, ProviderCredentials credentials, JsonNode body)
     {
         switch (route.Kind)
         {
-            case ProviderRouteKind.AnthropicDirect:
-                if (credentials.AnthropicKey is not { } anthropicKey)
-                {
-                    throw new ProviderRouteUnavailableException(ProviderCapability.Claude, ProviderRouter.NeedsAnthropicKeySentence);
-                }
-                return (DirectProviderRequests.AnthropicMessages(anthropicKey, body), false);
-            case ProviderRouteKind.Unavailable:
-                throw new ProviderRouteUnavailableException(ProviderCapability.Claude, route.Sentence ?? ProviderRouter.NeedsAnthropicKeySentence);
+            case ProviderRouteKind.AnthropicDirect when credentials.AnthropicKey is { } anthropicKey:
+                return DirectProviderRequests.AnthropicMessages(anthropicKey, body);
             case ProviderRouteKind.AnswerProvider:
                 // AnalyzeImageStreamingAsync hands these to an IAnswerProvider before building a request.
-                throw new ProviderRouteUnavailableException(ProviderCapability.Claude, $"{route.Source!.Value.DisplayName()} answers through its own provider");
+                throw new ProviderRouteUnavailableException(ProviderCapability.Claude, $"{route.Source!.Value.DisplayName()} answers through its own provider.");
             default:
-                var request = new HttpRequestMessage(HttpMethod.Post, ApiUrl) { Content = DirectProviderRequests.JsonContent(body) };
-                OpenClickyConfiguration.Authorize(request, credentials.AccountToken);
-                return (request, true);
+                throw new ProviderRouteUnavailableException(ProviderCapability.Claude, route.Sentence ?? ProviderRouter.NeedsAnthropicKeySentence);
         }
     }
 
     /// <summary>
     /// The start of a streamed answer: the response of a 2xx answer (its stream unread), or a
-    /// refusal whose body has been read to the end (BackendSignIn needs a 401's body to tell the
-    /// sign-in's from an own key's).
+    /// refusal whose body has been read to the end.
     /// </summary>
-    private sealed record StreamingAnswerStart(HttpResponseMessage? StreamingResponse, int Status, byte[] RefusalBody)
-    {
-        public (int Status, byte[] Body) StatusAndBody => (Status, RefusalBody);
-    }
+    private sealed record StreamingAnswerStart(HttpResponseMessage? StreamingResponse, int Status, byte[] RefusalBody);
 
     private static async Task<StreamingAnswerStart> StartStreamingAnswerAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -179,16 +141,16 @@ public sealed class ClaudeAPI
             if (hasStartedTlsWarmup) return;
             hasStartedTlsWarmup = true;
         }
-        Uri warmupTarget;
+        // Only an own Anthropic key talks to a host from here; plans run through their CLIs.
         try
         {
-            // Warm the host the next question will go to: Anthropic on an own key, else the backend.
-            warmupTarget = Credentials().AnthropicKey is not null ? new Uri(DirectProviderRequests.AnthropicMessagesUrl) : ApiUrl;
+            if (Credentials().AnthropicKey is null) return;
         }
         catch (Exception)
         {
             return;
         }
+        var warmupTarget = new Uri(DirectProviderRequests.AnthropicMessagesUrl);
         // The TLS session is host-scoped, so warming the root host is enough. Hitting the host
         // instead of `/v1/messages` avoids extra endpoint-specific noise.
         var warmupUrl = new UriBuilder(warmupTarget) { Path = "/", Query = "", Fragment = "" }.Uri;
@@ -287,21 +249,13 @@ public sealed class ClaudeAPI
         };
         if (tools.Count > 0) body["tools"] = new JsonArray(tools.Select(tool => (JsonNode)tool.DeepClone()).ToArray());
 
-        var (request, goesToBackend) = MakeApiRequest(route, Credentials(), body);
-        using var _ = request;
+        using var request = MakeApiRequest(route, Credentials(), body);
         Debug.WriteLine($"🌐 Claude streaming request: {PayloadMegabytes(body)}MB, {images.Count} image(s)");
 
-        // On the account's token a refused sign-in is renewed once and the question sent again,
-        // like every other backend call.
-        var streamingAnswerStart = goesToBackend
-            ? await BackendSignIn.SendAsync(request,
-                                            sent => StartStreamingAnswerAsync(sent, cancellationToken),
-                                            start => Task.FromResult(start.StatusAndBody),
-                                            signIn).ConfigureAwait(false)
-            : await StartStreamingAnswerAsync(request, cancellationToken).ConfigureAwait(false);
+        var streamingAnswerStart = await StartStreamingAnswerAsync(request, cancellationToken).ConfigureAwait(false);
         if (streamingAnswerStart.StreamingResponse is not { } response)
         {
-            throw new BackendHttpException(BackendHttpException.ServiceKind.Answers, streamingAnswerStart.Status, streamingAnswerStart.RefusalBody);
+            throw new AnswerHttpException(streamingAnswerStart.Status, streamingAnswerStart.RefusalBody);
         }
 
         using (response)
@@ -368,6 +322,52 @@ public sealed class ClaudeAPI
         Action<string> onTextChunk,
         CancellationToken cancellationToken)
     {
+        // If the plan has run out and nothing has been said yet, the backup plan answers the same
+        // question, once. Said already: the refusal stands, and the backup takes the next question.
+        var hasStarted = false;
+        void Chunk(string text)
+        {
+            Volatile.Write(ref hasStarted, true);
+            onTextChunk(text);
+        }
+        try
+        {
+            return await AskProviderAsync(source, images, systemPrompt, conversationHistory, userPrompt, tools, maxTokens, Chunk, cancellationToken).ConfigureAwait(false);
+        }
+        catch (AnswerProviderException refusal) when (refusal.IsPlanLimit)
+        {
+            await planLimits.NoteLimitHitAsync(source).ConfigureAwait(false);
+            if (Volatile.Read(ref hasStarted)
+                || Credentials().ActiveAnswerSource is not { } backup
+                || backup == source
+                || backup is not (AnswerSource.ClaudeCodePlan or AnswerSource.CodexPlan))
+            {
+                throw;
+            }
+            OpenClickyConfiguration.ShowNotice?.Invoke($"{source.ShortName()} hit its limit. {backup.ShortName()} is answering for now.");
+            try
+            {
+                return await AskProviderAsync(backup, images, systemPrompt, conversationHistory, userPrompt, tools, maxTokens, Chunk, cancellationToken).ConfigureAwait(false);
+            }
+            catch (AnswerProviderException secondRefusal) when (secondRefusal.IsPlanLimit)
+            {
+                await planLimits.NoteLimitHitAsync(backup).ConfigureAwait(false);
+                throw;
+            }
+        }
+    }
+
+    private async Task<AnswerResult> AskProviderAsync(
+        AnswerSource source,
+        IReadOnlyList<(byte[] Data, string Label)> images,
+        string systemPrompt,
+        IReadOnlyList<(string UserPlaceholder, string AssistantResponse)> conversationHistory,
+        string userPrompt,
+        IReadOnlyList<JsonObject> tools,
+        int maxTokens,
+        Action<string> onTextChunk,
+        CancellationToken cancellationToken)
+    {
         var provider = await makeAnswerProvider(source, Credentials(), cancellationToken).ConfigureAwait(false);
         var answerRequest = new AnswerRequest(
             images.Select(image => new AnswerRequest.Image(image.Data, image.Label, DetectImageMediaType(image.Data))),
@@ -421,18 +421,15 @@ public sealed class ClaudeAPI
             ["system"] = systemPrompt,
             ["messages"] = MessagesBody(images, conversationHistory, userPrompt),
         };
-        var (request, goesToBackend) = MakeApiRequest(route, Credentials(), body);
-        using var _ = request;
+        using var request = MakeApiRequest(route, Credentials(), body);
         Debug.WriteLine($"🌐 Claude request: {PayloadMegabytes(body)}MB, {images.Count} image(s)");
 
-        using var response = goesToBackend
-            ? await BackendSignIn.SendAsync(request, sent => HttpClients.Shared.SendAsync(sent, cancellationToken), signIn).ConfigureAwait(false)
-            : await HttpClients.Shared.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var response = await HttpClients.Shared.SendAsync(request, cancellationToken).ConfigureAwait(false);
         var data = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
         var status = (int)response.StatusCode;
         if (status is < 200 or > 299)
         {
-            throw new BackendHttpException(BackendHttpException.ServiceKind.Answers, status, data);
+            throw new AnswerHttpException(status, data);
         }
 
         var json = JsonHelpers.TryParse(data) as JsonObject;

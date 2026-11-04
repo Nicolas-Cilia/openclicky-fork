@@ -1,6 +1,5 @@
 // Ports SpokenStretchesTests.swift and TranscriptionEchoTests.swift, plus the pure parts of the
-// transcription providers: the PCM16/WAV helpers and silence gate, AssemblyAI's socket URL and turn
-// composition, the provider factory, Sarvam's upload pieces, and the offline engine's languages.
+// transcription providers: the PCM16/WAV helpers and silence gate, the provider factory, Sarvam's upload pieces, and the offline engine's languages.
 
 using System.Buffers.Binary;
 using OpenClicky.Core.Platform;
@@ -67,14 +66,8 @@ public class TranscriptionEchoTests
     }
 
     [Fact]
-    public void TheBackendBodyCarriesTheWavAndOnlyTheHintsThereAre()
+    public void TheTranscriptIsReadFromTheReply()
     {
-        var body = OpenAIAudioTranscriptionProvider.BackendRequestBody([1, 2, 3], "hi", null);
-        Assert.Equal("AQID", body["audio"]!.GetValue<string>());
-        Assert.Equal("audio/wav", body["mime"]!.GetValue<string>());
-        Assert.Equal("hi", body["language"]!.GetValue<string>());
-        Assert.False(body.ContainsKey("prompt"));
-        Assert.False(OpenAIAudioTranscriptionProvider.BackendRequestBody([1], "", "p").ContainsKey("language"));
         Assert.Equal("hello", OpenAIAudioTranscriptionProvider.ParseTranscript("""{"text":"  hello \n"}"""u8.ToArray()));
         Assert.Null(OpenAIAudioTranscriptionProvider.ParseTranscript("not json"u8.ToArray()));
     }
@@ -144,55 +137,6 @@ public class BuddyAudioConversionTests
     }
 }
 
-public class AssemblyAIStreamingTests
-{
-    [Fact]
-    public void TheSocketUrlAsksForPcm16FormattedTurnsAndTheKeyterms()
-    {
-        var url = AssemblyAIStreamingTranscriptionProvider.MakeWebsocketUrl("tok en", [" OpenClicky ", "", "Next.js"]);
-        Assert.Equal("wss", url.Scheme);
-        Assert.Equal("streaming.assemblyai.com", url.Host);
-        Assert.Equal("/v3/ws", url.AbsolutePath);
-        Assert.Equal(
-            "?sample_rate=16000&encoding=pcm_s16le&format_turns=true&speech_model=u3-rt-pro&keyterms_prompt=%5B%22OpenClicky%22%2C%22Next.js%22%5D&token=tok%20en",
-            url.Query);
-        var withoutKeyterms = AssemblyAIStreamingTranscriptionProvider.MakeWebsocketUrl("t", []);
-        Assert.DoesNotContain("keyterms_prompt", withoutKeyterms.Query);
-    }
-
-    [Fact]
-    public void TheTokenIsReadFromTheProxyAnswer()
-    {
-        Assert.Equal("abc", AssemblyAIStreamingTranscriptionProvider.ParseToken("""{"token":"abc"}"""u8.ToArray()));
-        Assert.Null(AssemblyAIStreamingTranscriptionProvider.ParseToken("""{"error":"no"}"""u8.ToArray()));
-        Assert.Null(AssemblyAIStreamingTranscriptionProvider.ParseToken("nope"u8.ToArray()));
-    }
-
-    [Fact]
-    public void TurnsAreComposedInOrderWithTheTurnBeingSpokenLast()
-    {
-        var transcript = new AssemblyAITurnTranscript();
-        Assert.Equal("hello", transcript.Receive("hello", 0, endOfTurn: false, isFormatted: false));
-        Assert.Equal("hello there", transcript.Receive("hello there", 0, endOfTurn: true, isFormatted: false));
-        Assert.Equal("Hello there.", transcript.Receive("Hello there.", 0, endOfTurn: true, isFormatted: true));
-        // A formatted turn is never replaced by an unformatted one.
-        Assert.Equal("Hello there.", transcript.Receive("hello there", 0, endOfTurn: true, isFormatted: false));
-        Assert.Equal("Hello there. how are", transcript.Receive("how are", 1, endOfTurn: false, isFormatted: false));
-        // No turn order: the active turn's, else the next one.
-        Assert.Equal("Hello there. how are you", transcript.Receive("how are you", null, endOfTurn: false, isFormatted: false));
-        Assert.Equal("Hello there. How are you?", transcript.Receive("How are you?", null, endOfTurn: true, isFormatted: true));
-        Assert.Equal("Hello there. How are you?", transcript.BestAvailableTranscriptText());
-    }
-
-    [Fact]
-    public void TheStreamingModelsLanguagesAreKnown()
-    {
-        Assert.True(AssemblyAIStreamingTranscriptionProvider.Hears(null));
-        Assert.True(AssemblyAIStreamingTranscriptionProvider.Hears("hi"));
-        Assert.False(AssemblyAIStreamingTranscriptionProvider.Hears("ta"));
-    }
-}
-
 public class BuddyTranscriptionProviderFactoryTests
 {
     private sealed class FakeProvider(string name, bool configured) : IBuddyTranscriptionProvider
@@ -205,33 +149,37 @@ public class BuddyTranscriptionProviderFactoryTests
             Action<string> onFinalTranscriptReady, Action<Exception> onError, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
-    private static string Resolve(string? stored, bool configured, bool assembly, bool openAI) =>
-        BuddyTranscriptionProviderFactory.ResolveProvider(stored, configured, new FakeProvider("assemblyai", assembly), new FakeProvider("openai", openAI),
+    private static string Resolve(string? stored, bool configured, bool openAI) =>
+        BuddyTranscriptionProviderFactory.ResolveProvider(stored, configured, new FakeProvider("openai", openAI),
             () => new FakeProvider("offline", true)).DisplayName;
 
     [Fact]
     public void AStoredPreferenceWinsWhenItCanRun()
     {
-        Assert.Equal("offline", Resolve("apple", true, true, true));
-        Assert.Equal("assemblyai", Resolve("AssemblyAI", true, true, true));
-        Assert.Equal("openai", Resolve("openai", true, true, true));
+        Assert.Equal("offline", Resolve("apple", true, true));
+        Assert.Equal("openai", Resolve("openai", true, true));
     }
 
     [Fact]
-    public void APreferenceThatCannotRunFallsBackToTheOtherCloudThenOffline()
+    public void APreferenceThatCannotRunFallsBackToOffline()
     {
-        Assert.Equal("openai", Resolve("assemblyai", true, false, true));
-        Assert.Equal("offline", Resolve("assemblyai", true, false, false));
-        Assert.Equal("assemblyai", Resolve("openai", true, true, false));
-        Assert.Equal("offline", Resolve("openai", false, false, false));
+        Assert.Equal("offline", Resolve("openai", true, false));
+        Assert.Equal("offline", Resolve("openai", false, false));
     }
 
     [Fact]
-    public void WithoutAPreferenceAnAccountMeansUploadTranscription()
+    public void APreferenceForARemovedEngineReadsAsNone()
     {
-        Assert.Equal("openai", Resolve(null, true, true, true));
-        Assert.Equal("assemblyai", Resolve(null, false, true, true));
-        Assert.Equal("offline", Resolve(null, false, false, false));
+        Assert.Equal("openai", Resolve("assemblyai", true, true));
+        Assert.Equal("offline", Resolve("assemblyai", true, false));
+    }
+
+    [Fact]
+    public void WithoutAPreferenceAKeyMeansUploadTranscription()
+    {
+        Assert.Equal("openai", Resolve(null, true, true));
+        Assert.Equal("openai", Resolve(null, false, true));
+        Assert.Equal("offline", Resolve(null, false, false));
     }
 }
 

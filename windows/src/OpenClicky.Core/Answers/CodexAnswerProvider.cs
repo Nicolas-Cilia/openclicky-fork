@@ -41,8 +41,11 @@ public sealed class CodexAnswerProvider(
     string executablePath,
     string? model = null,
     IPlanCliProcessRunner? processRunner = null,
-    double timeoutSeconds = 120) : IAnswerProvider
+    double timeoutSeconds = 120,
+    PlanUsageSink? usageSink = null) : IAnswerProvider
 {
+    private readonly PlanUsageSink usageSink = usageSink ?? PlanUsageSink.None;
+
     public string ExecutablePath { get; } = executablePath;
     /// <summary>`-m`: e.g. "gpt-5.5"; null = Codex's default for a ChatGPT sign-in.</summary>
     public string? Model { get; } = model;
@@ -83,29 +86,39 @@ public sealed class CodexAnswerProvider(
             }
             var outputFilePath = Path.Combine(scratchWorkingDirectory, OutputFileName);
 
+            var finishMeasuring = this.usageSink.BeginCodexRequest();
             PlanCliProcessOutput output;
             try
             {
-                output = await processRunner.RunAsync(
-                    ExecutablePath,
-                    CommandLineArguments(Model, PlanToolProtocol.SystemPrompt(request.SystemPrompt, request.Tools),
-                                         imageFilePaths, outputFilePath, scratchWorkingDirectory),
-                    Encoding.UTF8.GetBytes(PromptText(request)),
-                    scratchWorkingDirectory,
-                    PlanCLIs.ProcessEnvironment(ExecutablePath),
-                    TimeoutSeconds,
-                    null,
-                    cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    output = await processRunner.RunAsync(
+                        ExecutablePath,
+                        CommandLineArguments(Model, PlanToolProtocol.SystemPrompt(request.SystemPrompt, request.Tools),
+                                             imageFilePaths, outputFilePath, scratchWorkingDirectory),
+                        Encoding.UTF8.GetBytes(PromptText(request)),
+                        scratchWorkingDirectory,
+                        PlanCLIs.ProcessEnvironment(ExecutablePath),
+                        TimeoutSeconds,
+                        null,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception)
+                {
+                    throw new AnswerProviderException(AnswerSource.CodexPlan, 0, $"Couldn't start Codex at {ExecutablePath}.");
+                }
             }
-            catch (OperationCanceledException)
+            finally
             {
-                throw;
-            }
-            catch (Exception)
-            {
-                throw new AnswerProviderException(AnswerSource.CodexPlan, 0, $"Couldn't start Codex at {ExecutablePath}.");
+                finishMeasuring();
             }
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (UsageSample(output.StandardOutputText) is { } sample) this.usageSink.Record(sample);
 
             string? outputFileContents;
             try { outputFileContents = File.ReadAllText(outputFilePath, Encoding.UTF8); }
@@ -250,6 +263,15 @@ public sealed class CodexAnswerProvider(
     /// event. The message is often the API's JSON error body itself
     /// (`{"type":"error","status":400,"error":{"message":"..."}}`), so the inner message is used.
     /// </summary>
+    public static PlanUsageSample? UsageSample(string jsonLines)
+    {
+        var usage = JsonEvents(jsonLines).LastOrDefault(json => JsonHelpers.String(json["type"]) == "turn.completed")?["usage"] as JsonObject;
+        if (usage is null) return null;
+        int Count(string key) => usage[key] is JsonValue value && value.TryGetValue<int>(out var count) ? count : 0;
+        return new PlanUsageSample(DateTimeOffset.UtcNow, AnswerSource.CodexPlan.Id(), PlanUsageLane.Answer,
+                                   Count("input_tokens"), Count("cached_input_tokens"), Count("output_tokens"));
+    }
+
     public static string? ErrorMessage(string jsonLines)
     {
         string? turnFailedMessage = null;
@@ -304,7 +326,7 @@ public sealed class CodexAnswerProvider(
         {
             return "Codex is signed out. Open a terminal, run codex login, and sign in with ChatGPT.";
         }
-        if (lowercasedFailureText.Contains("usage limit") || lowercasedFailureText.Contains("rate limit"))
+        if (PlanLimitText.Matches(trimmedFailureText))
         {
             return "Your ChatGPT plan has hit its Codex usage limit for now.";
         }

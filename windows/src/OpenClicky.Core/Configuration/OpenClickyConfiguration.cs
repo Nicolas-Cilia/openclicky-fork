@@ -1,7 +1,6 @@
-// Ports OpenClickyConfiguration.swift: where the backend lives, the user's token, and how to run
-// the `openclicky` CLI. Read from %USERPROFILE%\.openclicky\shell.json (shared with the CLI) with
-// environment overrides. The app never holds provider keys for the backend — only the user's
-// OpenClicky token, which the backend verifies; own keys go straight to their vendors.
+// Ports OpenClickyConfiguration.swift: the person's keys and plans, and how to run the `openclicky`
+// CLI. Read from %USERPROFILE%\.openclicky\shell.json (shared with the CLI) with
+// environment overrides. Own keys go straight to their vendors.
 
 using System.Collections;
 using System.Text.Json;
@@ -12,8 +11,8 @@ namespace OpenClicky.Core.Configuration;
 
 public static class OpenClickyConfiguration
 {
-    /// <summary>Where the app talks to unless shell.json says otherwise.</summary>
-    public const string HostedBackendUrl = "https://api.openclicky.org";
+    /// <summary>The companion's quiet caption, for a sentence worth saying from anywhere; set once it has started.</summary>
+    public static Action<string>? ShowNotice { get; set; }
 
     /// <summary>
     /// Connectors (Composio app connections). Off for 0.8.0; a later release turns them back on by
@@ -62,7 +61,7 @@ public static class OpenClickyConfiguration
 
     /// <summary>
     /// Raised when shell.json changed on disk in a way that matters to a live connection: the token,
-    /// the backend, or one of the user's own keys.
+    /// one of the user's own keys.
     /// </summary>
     public static event Action? CredentialsChanged;
 
@@ -78,7 +77,7 @@ public static class OpenClickyConfiguration
 
     /// <summary>What a live session was opened with. When this changes, the session is stale.</summary>
     public static IReadOnlyList<string> CredentialFingerprint(OpenClickyShellSettings shellSettings) =>
-        [shellSettings.BackendUrl, shellSettings.Token, shellSettings.OpenaiApiKey ?? "", shellSettings.AnthropicApiKey ?? "",
+        [shellSettings.OpenaiApiKey ?? "", shellSettings.AnthropicApiKey ?? "",
          shellSettings.GeminiApiKey ?? "", shellSettings.RealtimeProvider ?? ""];
 
     // MARK: - Watching the file
@@ -168,7 +167,7 @@ public static class OpenClickyConfiguration
 
     /// <summary>
     /// File settings, then environment overrides: OPENCLICKY_SHELL_CLI ("node C:\path\cli.js"),
-    /// BACKEND_URL, OPENCLICKY_TOKEN, OPENCLICKY_WORKSPACE, OPENCLICKY_MODEL,
+    /// OPENCLICKY_WORKSPACE, OPENCLICKY_MODEL,
     /// OPENCLICKY_TRANSCRIPTION_PROVIDER. The overrides live only in memory: `Update` starts from
     /// the file alone, so it never writes them.
     /// </summary>
@@ -194,8 +193,6 @@ public static class OpenClickyConfiguration
         }
         if (environment.TryGetValue("OPENCLICKY_SHELL_CLI", out var cli) && cli.Length > 0)
             loadedSettings.CliCommand = cli.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
-        if (environment.TryGetValue("BACKEND_URL", out var backendUrl) && backendUrl.Length > 0) loadedSettings.BackendUrl = backendUrl;
-        if (environment.TryGetValue("OPENCLICKY_TOKEN", out var token) && token.Length > 0) loadedSettings.Token = token;
         if (environment.TryGetValue("OPENCLICKY_WORKSPACE", out var workspace) && workspace.Length > 0) loadedSettings.Workspace = workspace;
         if (environment.TryGetValue("OPENCLICKY_MODEL", out var model) && model.Length > 0) loadedSettings.Model = model;
         if (environment.TryGetValue("OPENCLICKY_TRANSCRIPTION_PROVIDER", out var provider) && provider.Length > 0) loadedSettings.TranscriptionProvider = provider;
@@ -258,6 +255,9 @@ public static class OpenClickyConfiguration
     public static string UnreadableSettingsFileSentence(string reason) =>
         $"your settings file (%USERPROFILE%\\.openclicky\\shell.json) has a mistake in it: {reason}. openclicky won't change it until it's fixed.";
 
+    /// <summary>The app is using the person's own shell.json (a test uses a temporary one).</summary>
+    public static bool IsRealSettingsFileInUse => IsRealSettingsFile(SettingsFilePath);
+
     private static bool IsRealSettingsFile(string filePath) =>
         string.Equals(Path.GetFullPath(filePath), Path.GetFullPath(SettingsFilePath), StringComparison.OrdinalIgnoreCase);
 
@@ -270,8 +270,8 @@ public static class OpenClickyConfiguration
         var sentence = UnreadableSettingsFileSentence(reason);
         if (SettingsFileProblem == sentence) return;
         SettingsFileProblem = sentence;
-        // AccountProfileStore listens and shows it as the quiet caption (it may not exist yet: this
-        // can run during the very first load).
+        // The companion listens and shows it as the quiet caption (it may not exist yet: this can run
+        // during the very first load).
         SettingsFileUnreadable?.Invoke(sentence);
     }
 
@@ -294,7 +294,7 @@ public static class OpenClickyConfiguration
 
     // MARK: - Writing
 
-    /// <summary>Changes shell.json in place (sign-in writes the session here) and reloads the settings.</summary>
+    /// <summary>Changes shell.json in place and reloads the settings.</summary>
     public static void Update(Action<OpenClickyShellSettings> change)
     {
         Update(SettingsFilePath, change);
@@ -339,6 +339,8 @@ public static class OpenClickyConfiguration
                 if (hasAfter) fileJsonObject[fieldName] = valueAfter?.DeepClone();
                 else fileJsonObject.Remove(fieldName);
             }
+            // Written when the app had accounts; nothing reads them now, so a save clears them out.
+            foreach (var retiredField in RetiredFields) fileJsonObject.Remove(retiredField);
             WriteShellSettingsData(SortedIndentedJson(fileJsonObject), filePath);
             return true;
         }
@@ -348,6 +350,8 @@ public static class OpenClickyConfiguration
             return false;
         }
     }
+
+    public static readonly IReadOnlyList<string> RetiredFields = ["backendUrl", "token", "refreshToken", "tokenExpiresAt", "accountEmail"];
 
     private static string SortedIndentedJson(JsonObject jsonObject)
     {
@@ -392,31 +396,14 @@ public static class OpenClickyConfiguration
 
     // MARK: - Derived values
 
-    /// <summary>Backend base URL without a trailing slash.</summary>
-    public static string BackendBaseUrl => TrimmedBackendUrl(Settings.BackendUrl);
-
-    private static string TrimmedBackendUrl(string backendUrl)
-    {
-        var url = backendUrl.Trim().TrimEnd('/');
-        return url.Length == 0 ? HostedBackendUrl : url;
-    }
-
-    public static string BackendHostDescription =>
-        Uri.TryCreate(BackendBaseUrl, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host) ? uri.Host : BackendBaseUrl;
-
-    public static string? Token => Cleaned(Settings.Token);
-
-    /// <summary>True when this PC is signed in to an OpenClicky account (a token in shell.json).</summary>
-    public static bool HasAccountToken => Token is not null;
-
-    /// <summary>True when model calls can be made at all: an own key, a plan, or an account.</summary>
+    /// <summary>True when model calls can be made at all: an own key or a plan.</summary>
     public static bool IsConfigured => IsConfiguredFor(Settings);
 
     public static bool IsConfiguredFor(OpenClickyShellSettings shellSettings)
     {
         var credentials = ProviderCredentials.FromSettings(shellSettings);
-        // An account, an OpenAI key (it also covers speech and dictation), or anything that can answer.
-        return credentials.AccountToken is not null || credentials.OpenAIKey is not null || credentials.AnswerSourcesInOrder.Count > 0;
+        // An OpenAI key (it also covers speech and dictation), or anything that can answer.
+        return credentials.OpenAIKey is not null || credentials.AnswerSourcesInOrder.Count > 0;
     }
 
     /// <summary>
@@ -449,7 +436,9 @@ public static class OpenClickyConfiguration
         return CuaDriverCandidates.FirstOrDefault(check);
     }
 
-    public static IReadOnlyList<string> CliCommand => Settings.CliCommand;
+    /// <summary>What agent tasks run (AgentTool).</summary>
+    public static IReadOnlyList<string> CliCommand =>
+        Agent.AgentTool.Command(Settings.CliCommand, Agent.AgentTool.BundledScript, Agent.AgentTool.DownloadedNode, Agent.AgentTool.SystemNode);
     public static string WorkspacePath => OpenClickyPaths.ExpandTilde(Settings.Workspace);
     public static string? AgentModelOverride => string.IsNullOrEmpty(Settings.Model) ? null : Settings.Model;
 
@@ -509,22 +498,8 @@ public static class OpenClickyConfiguration
     public static bool UsesOwnKeys => UsesOwnKeysFor(Settings);
 
     /// <summary>
-    /// Adds the account's bearer token to a backend request. Never the person's own provider keys:
-    /// those go straight to their vendor (ProviderRouter). No token, no header: the backend refuses
-    /// an empty `Authorization: Bearer `.
-    /// </summary>
-    public static void Authorize(HttpRequestMessage request) => Authorize(request, Token);
-
-    public static void Authorize(HttpRequestMessage request, string? token)
-    {
-        if (token is null) return;
-        request.Headers.Remove("Authorization");
-        request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {token}");
-    }
-
-    /// <summary>
     /// Environment for the `openclicky` CLI subprocess. Provider keys are stripped on purpose; the
-    /// user's own keys travel under OpenClicky names so the CLI forwards them as headers.
+    /// user's own keys travel under OpenClicky names.
     /// </summary>
     public static Dictionary<string, string> CliProcessEnvironment => CliProcessEnvironmentFor(Settings);
 
@@ -532,8 +507,6 @@ public static class OpenClickyConfiguration
                                                                       IReadOnlyDictionary<string, string>? baseEnvironment = null)
     {
         var environment = new Dictionary<string, string>(baseEnvironment ?? ProcessEnvironment(), EnvironmentComparer);
-        environment["BACKEND_URL"] = TrimmedBackendUrl(shellSettings.BackendUrl);
-        if (Cleaned(shellSettings.Token) is { } token) environment["OPENCLICKY_TOKEN"] = token;
         if (Cleaned(shellSettings.Model) is { } model) environment["OPENCLICKY_MODEL"] = model;
         environment["OPENCLICKY_WORKSPACE"] = OpenClickyPaths.ExpandTilde(shellSettings.Workspace);
         if (shellSettings.WritableRoots is { } writableRoots) environment["OPENCLICKY_WRITABLE_ROOTS"] = string.Join(",", writableRoots);

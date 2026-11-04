@@ -39,7 +39,6 @@ public class ScreenElementGrounderTests
     public void GroundingRunsOnEveryAnswerSourceButThePlans()
     {
         Assert.Null(ScreenElementGrounder.ReasonGroundingCannotRun(new GroundingRoute.AnthropicDirect()));
-        Assert.Null(ScreenElementGrounder.ReasonGroundingCannotRun(new GroundingRoute.Backend()));
         Assert.Null(ScreenElementGrounder.ReasonGroundingCannotRun(new GroundingRoute.OpenAIDirect()));
         foreach (var source in new[] { "OpenAI", "OpenRouter", "Gemini", "Groq", "Mistral", "xAI" })
         {
@@ -84,7 +83,7 @@ public class ScreenElementGrounderTests
     {
         GroundingRequest? sent = null;
         var located = await ScreenElementGrounder.LocateAsync("paper link", "", "open the paper", new byte[] { 1 }, ImageWidth, ImageHeight,
-            new GroundingRoute.Backend(), request => { sent = request; return Task.FromResult("[POINT:516, 503:arXiv]"); });
+            new GroundingRoute.AnthropicDirect(), request => { sent = request; return Task.FromResult("[POINT:516, 503:arXiv]"); });
         Assert.Equal(new ScreenElementGrounder.Located(new ScreenPoint(516, 503), "arXiv"), located);
         Assert.Equal(ScreenElementGrounder.Model, sent?.Model);
         Assert.Equal("Screenshot of the user's screen, 1280×831 px, origin top-left.", sent?.ImageLabel);
@@ -101,7 +100,7 @@ public class ScreenElementGrounderTests
         Assert.Equal("point_at: no grounding (nothing is set up to answer)", logLines.Single());
 
         Assert.Null(await ScreenElementGrounder.LocateAsync("x", "", null, Array.Empty<byte>(), ImageWidth, ImageHeight,
-            new GroundingRoute.Backend(), _ => throw new HttpRequestException("secret body"), logLines.Add));
+            new GroundingRoute.AnthropicDirect(), _ => throw new HttpRequestException("secret body"), logLines.Add));
         Assert.StartsWith("point_at: grounding failed (HttpRequestException", logLines[1]);
         Assert.DoesNotContain("secret", logLines[1]);
     }

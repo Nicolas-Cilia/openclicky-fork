@@ -40,7 +40,6 @@ struct ScreenElementGrounderTests {
     // grounding never ran there. Keys with images run it; only the slow plans are skipped.
     @Test func groundingRunsOnEveryAnswerSourceButThePlans() {
         #expect(ScreenElementGrounder.reasonGroundingCannotRun(on: .anthropicDirect) == nil)
-        #expect(ScreenElementGrounder.reasonGroundingCannotRun(on: .backend) == nil)
         for source in [AnswerSource.openAI, .openRouter, .gemini, .groq, .mistral, .xai] {
             #expect(ScreenElementGrounder.reasonGroundingCannotRun(on: .answerProvider(source)) == nil)
         }

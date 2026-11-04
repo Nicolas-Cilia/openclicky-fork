@@ -6,7 +6,7 @@
 //  missed). The Realtime model's own pixel guess is hundreds of pixels off for icons, but Claude
 //  locates an element on the same 1280 px screenshot to within a few pixels (measured ≤ 8 px on
 //  a "+" header button and a small "New" button, 2–4 s with Haiku 4.5), so the description the
-//  Realtime model gave is handed to Claude (an own Anthropic key, or the backend's /chat proxy) or,
+//  Realtime model gave is handed to Claude (an own Anthropic key) or,
 //  when another answer source is picked, to that source's AnswerProvider. The plans are skipped.
 //
 //  The HTTP call goes through an injected delegate (the Answers/Providers port supplies ClaudeAPI's
@@ -25,7 +25,6 @@ public abstract record GroundingRoute
 
     public sealed record Unavailable(string Reason) : GroundingRoute;
     public sealed record AnthropicDirect : GroundingRoute;
-    public sealed record Backend : GroundingRoute;
     public sealed record OpenAIDirect : GroundingRoute;
     /// <param name="DisplayName">The answer source's display name.</param>
     /// <param name="IsPlan">The Claude Code / Codex plans (answer through a slow CLI).</param>
@@ -52,7 +51,7 @@ public static class ScreenElementGrounder
     /// <summary>Asks Claude where <paramref name="label"/>/<paramref name="text"/> is on the screenshot. Null when nothing
     /// can answer (or only a plan), the request fails, or Claude answers [POINT:none]; the log says when it could not ask.</summary>
     /// <param name="analyzeImage">Sends the request and returns the reply text.
-    /// Answers.ScreenElementGrounding.LocateAsync wires this to ClaudeAPI("{backendBaseURL}/chat", Model).AnalyzeImageAsync.</param>
+    /// Answers.ScreenElementGrounding.LocateAsync wires this to ClaudeAPI(Model).AnalyzeImageAsync.</param>
     public static async Task<Located?> LocateAsync(
         string label,
         string text,

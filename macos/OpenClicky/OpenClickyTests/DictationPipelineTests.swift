@@ -69,14 +69,13 @@ struct DictationPipelineTests {
         let sarvam = try #require(NotchEngineWarning(engine: .sarvam, unavailableReason: "needs your sarvam key"))
         #expect(sarvam.buttonTitle == "add a key")
 
-        #expect(NotchEngineWarning(engine: .openclicky, unavailableReason: nil) == nil)
-        #expect(!(NotchEngineWarning(engine: .assemblyai, unavailableReason: "needs your own key")?.buttonTitle.contains("shell.json") ?? true))
+        #expect(NotchEngineWarning(engine: .openAI, unavailableReason: nil) == nil)
+        #expect(!(NotchEngineWarning(engine: .openAI, unavailableReason: "needs your own openai key")?.buttonTitle.contains("shell.json") ?? true))
     }
 
-    @Test func anEngineOnThisMacIsNeverSentToTheAccountPage() {
+    @Test func anEngineOnThisMacIsNeverSentToTheKeysPage() {
         #expect(NotchVoiceDestination.setupDestination(for: .parakeet, unavailableReason: "needs its 465 MB download") == .dictationSettings)
-        #expect(NotchVoiceDestination.setupDestination(for: .openclicky, unavailableReason: "needs your own key") == .keySettings)
-        #expect(NotchVoiceDestination.setupDestination(for: .assemblyai, unavailableReason: "needs an openclicky account: assemblyai runs on openclicky's key") == .accountSettings)
+        #expect(NotchVoiceDestination.setupDestination(for: .openAI, unavailableReason: "needs your own openai key") == .keySettings)
         #expect(NotchVoiceDestination.setupDestination(for: .sarvam, unavailableReason: nil) == .dictationSettings)
     }
 

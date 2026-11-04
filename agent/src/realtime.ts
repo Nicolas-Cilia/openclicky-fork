@@ -102,22 +102,21 @@ export class RealtimeSession {
     this.opts.onEvent?.(line);
   }
 
-  /** Mint the ephemeral secret (own OpenAI key: from OpenAI directly; else via the backend), connect, configure the session, start the mic. */
+  /** Mint the ephemeral secret (from OpenAI directly, on the person's own key), connect, configure the session, start the mic. */
   async start(): Promise<void> {
     const { cfg } = this.opts;
-    const route = openaiRoute(cfg, "/agent/realtime/session", "/realtime/client_secrets", { "content-type": "application/json" });
+    const route = openaiRoute(cfg, "/realtime/client_secrets", { "content-type": "application/json" });
     if (!route) throw new Error(`talk ${needsOpenAI}`);
     const f = this.opts.fetchImpl ?? fetch;
     const instructions = this.opts.instructions ?? TALK_INSTRUCTIONS;
     const res = await f(route.url, {
       method: "POST",
       headers: route.headers,
-      body: JSON.stringify(route.direct ? realtimeSecretBody({ voice: this.opts.voice, instructions }) : { voice: this.opts.voice, instructions }),
+      body: JSON.stringify(realtimeSecretBody({ voice: this.opts.voice, instructions })),
     });
-    const from = route.direct ? "openai" : "backend";
-    if (!res.ok) throw new Error(`${from} ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    if (!res.ok) throw new Error(`openai ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const secret = (await res.json()) as { value?: string; session?: { model?: string } };
-    if (!secret.value) throw new Error(`${from} returned no client secret`);
+    if (!secret.value) throw new Error("openai returned no client secret");
     const model = secret.session?.model ?? "gpt-realtime";
     const base = (this.opts.realtimeUrl ?? "wss://api.openai.com/v1/realtime").replace(/\/+$/, "");
     const url = `${base}?model=${encodeURIComponent(model)}`;

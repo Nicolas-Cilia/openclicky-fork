@@ -17,6 +17,8 @@ struct OpenClickyAgentRunResult {
     var threadId: String?
     var status: String = "unknown"
     var errorMessage: String?
+    /// Token counts for the turn, from the CLI.
+    var usage: [String: Any]?
 }
 
 /// One Codex thread as reported by `openclicky threads list --json`.
@@ -57,9 +59,9 @@ struct OpenClickyAgentError: LocalizedError {
     let message: String
     var errorDescription: String? { message }
 
-    /// Said instead of env's "No such file or directory" when the agent tool isn't on this Mac
-    /// (the downloaded app doesn't carry it).
-    nonisolated static let toolMissingMessage = "agents run through the openclicky command-line tool, which isn't on this mac. questions, pointing and quick actions still work."
+    /// Said instead of env's "No such file or directory" when the agent tool can't run yet: the
+    /// app is still fetching Node (AgentTool), or couldn't.
+    nonisolated static let toolMissingMessage = "agent tasks are still setting up on this mac. try again in a minute. questions, pointing and quick actions still work."
 
     /// Whether `name` runs: an executable path, or a name found on `path` (the CLI's PATH).
     nonisolated static func toolResolves(_ name: String, path: String?) -> Bool {
@@ -102,6 +104,10 @@ final class OpenClickyAgentClient {
         if let screenshotPath { arguments += ["--image", screenshotPath] }
         if let threadId { arguments += ["--thread", threadId] }
         if let model = OpenClickyConfiguration.agentModelOverride { arguments += ["--model", model] }
+        // A task on an own key doesn't touch the plan's limits.
+        var finishMeasuring: (@Sendable () -> Void)?
+        if !ProviderCapabilities.current().hasOwnOpenAIKey { finishMeasuring = await PlanLimitStore.shared.beginCodexRequest() }
+        defer { finishMeasuring?() }
         return try await execute(arguments: arguments, onEvent: onEvent)
     }
 
@@ -109,6 +115,13 @@ final class OpenClickyAgentClient {
     func listThreads(limit: Int = 30) async throws -> [OpenClickyThreadSummary] {
         let data = try await captureStandardOutput(arguments: ["threads", "list", "--limit", String(limit), "--json"])
         return try JSONDecoder().decode([OpenClickyThreadSummary].self, from: data)
+    }
+
+    /// Deletes threads untouched for `days` days, and returns their ids.
+    func pruneThreads(olderThanDays days: Int) async throws -> [String] {
+        struct Reply: Decodable { let deleted: [String] }
+        let data = try await captureStandardOutput(arguments: ["threads", "prune", "--older-than-days", String(days), "--json"])
+        return try JSONDecoder().decode(Reply.self, from: data).deleted
     }
 
     /// Full turn history of one thread.
@@ -173,6 +186,25 @@ final class OpenClickyAgentClient {
         }
     }
 
+    /// Counts the task against the plan that ran it, and notices when the plan has run out.
+    private static func reportUsage(of result: OpenClickyAgentRunResult) {
+        let onPlan = !ProviderCapabilities.current().hasOwnOpenAIKey
+        if let usage = result.usage {
+            PlanUsageLedger.shared.record(PlanUsageSample(
+                date: Date(), source: (onPlan ? AnswerSource.codexPlan : .openAI).rawValue, lane: .agent,
+                inputTokens: usage["inputTokens"] as? Int ?? 0, cachedInputTokens: usage["cachedInputTokens"] as? Int ?? 0,
+                outputTokens: usage["outputTokens"] as? Int ?? 0, estimatedCostUSD: nil))
+        }
+        guard onPlan else { return }
+        Task { @MainActor in
+            if let message = result.errorMessage, PlanLimitText.matches(message) {
+                await PlanLimitStore.shared.noteLimitHit(.codexPlan)
+            } else {
+                await PlanLimitStore.shared.refreshCodex()
+            }
+        }
+    }
+
     // MARK: - Process plumbing
 
     private func execute(
@@ -225,6 +257,7 @@ final class OpenClickyAgentClient {
                     collector.flush()
                     self.runningProcess = nil
                     var result = collector.result
+                    Self.reportUsage(of: result)
                     if terminationStatus != 0 && result.errorMessage == nil {
                         result.errorMessage = collector.lastStderrLine ?? "openclicky exited with status \(terminationStatus)"
                     }
@@ -302,6 +335,7 @@ private final class EventCollector {
             result.text = object["text"] as? String ?? streamedText
             result.status = "completed"
         case "result":
+            result.usage = object["usage"] as? [String: Any]
             result.threadId = object["threadId"] as? String
             result.artifacts = object["artifacts"] as? [String] ?? []
             result.status = object["status"] as? String ?? "completed"

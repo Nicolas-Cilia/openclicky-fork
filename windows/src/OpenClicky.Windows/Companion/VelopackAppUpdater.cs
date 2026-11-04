@@ -17,7 +17,7 @@ namespace OpenClicky.Windows.Companion;
 
 public sealed class VelopackAppUpdater : ObservableObject, IAppUpdater, IDisposable
 {
-    public const string RepositoryUrl = "https://github.com/prasanthsasikumar/openclicky";
+    public const string RepositoryUrl = "https://github.com/Nicolas-Cilia/openclicky-fork";
     public const string AutomaticallyChecksKey = "openclicky.updates.automaticallyChecks";
     public const string LastCheckKey = "openclicky.updates.lastCheck";
     /// <summary>The version "Skip This Version" was pressed for (Sparkle's SUSkippedVersion).</summary>
