@@ -15,6 +15,17 @@ release page shows each platform under its own heading once that platform's file
 (`scripts/update-release-page.sh`, run by the Windows release workflow), followed by a
 downloads table. Under a platform heading, don't start bullets with "Windows:" again.
 
+## 0.11.1
+
+### All platforms
+
+- **The pointer stays out of the way.** It now shows only while you talk to Clicky. Choose Always, or another option, in Settings → Clicky.
+- **Setup reads properly on the side.** With the island on a screen edge, the tour's words no longer get cut off, and its last step says where to find the island.
+
+### Mac
+
+- **Install from Terminal.** One command installs the newest version, with no security warning to get past. The README has it, along with the steps for opening a normal download.
+
 ## 0.11.0
 
 ### All platforms
@@ -25,12 +36,10 @@ downloads table. Under a platform heading, don't start bullets with "Windows:" a
 - **Updates come from this fork.**
 - **Agent tasks work without any setup beyond signing in to Codex.** The tool they use now comes with the app. If your computer has no Node.js, the app downloads it once when you have agent tasks set up.
 - **A more natural voice on offer.** The first-run tour offers Kokoro, a free voice that runs on your computer. It only downloads if you say yes.
-- **The pointer stays out of the way.** It now shows only while you talk to Clicky. Choose Always, or another option, in Settings → Clicky.
 - **Keeps less on your computer.** Agent tasks and the screenshots saved with them are deleted after 14 days. Choose 7, 30 or 90 days, or Forever, in Settings → Privacy. Failed dictation audio now stops at 200 MB, and deleting a take deletes its audio.
 
 ### Mac
 
-- **Install from Terminal.** One command installs the newest version, with no security warning to get past. The README has it, along with the steps for opening a normal download.
 - **Much lighter when idle.** OpenClicky no longer animates hidden indicators in the background, so it uses far less CPU and memory while you aren't talking to it.
 - **Shares the notch.** The new Automatic placement moves the island to the right edge while another app, such as Vorssaint, is using the notch.
 
