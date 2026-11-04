@@ -15,6 +15,7 @@
 
 using OpenClicky.Core.Configuration;
 using OpenClicky.Core.Dictation;
+using OpenClicky.Core.Pointing;
 using OpenClicky.Core.Providers;
 using OpenClicky.Core.Settings;
 using OpenClicky.Core.Shortcuts;
