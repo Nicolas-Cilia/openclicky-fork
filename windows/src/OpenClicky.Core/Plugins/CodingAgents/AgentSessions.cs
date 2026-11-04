@@ -21,7 +21,7 @@ public static class CodingAgentsPlugin
     /// <summary>Up to three session rows on the left, Claude's plan-limit rings on the right.</summary>
     public static IslandComponent Component { get; } = new(
         IslandPluginRegistry.AgentsId, "Coding agents", "", 76, IsPlugin: true,
-        SettingsDetail: "Follows Claude Code and Codex sessions on this PC from their own logs, and reads Claude Code's sign-in on this PC for the plan limits.");
+        SettingsDetail: "Follows Claude Code and Codex sessions on this PC from their own logs. Claude's plan limits show once Clicky has answered on your Claude plan.");
 }
 
 public enum AgentKind

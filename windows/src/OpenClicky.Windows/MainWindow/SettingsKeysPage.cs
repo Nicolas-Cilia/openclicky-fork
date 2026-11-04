@@ -108,7 +108,9 @@ internal sealed partial class SettingsRowFactory
         keyField.KeyDown += (_, arguments) => { if (arguments.Key == System.Windows.Input.Key.Enter) Add(); };
         addButton.Click += (_, _) => Add();
         stack.Children.Add(Ui.Card(Ui.Row("Add a key", keysState.AddStatus ?? keysState.NewProvider.Detail(), query,
-            Ui.HStack(8, providerPicker, keyField, addButton))));
+            Ui.HStack(8, providerPicker, keyField,
+                keysState.NewProvider.KeyPageUrl() is { } keyPageUrl ? Ui.Button("Get a Key ↗", () => Ui.OpenExternal(keyPageUrl)) : null,
+                addButton))));
         return stack;
     }
 
@@ -161,6 +163,7 @@ internal sealed partial class SettingsRowFactory
         private PlanCliStatus? status;
         private string? checkSentence;
         private bool isChecking;
+        private readonly Core.Answers.PlanSignInCoordinator signIn = Core.Answers.PlanSignInCoordinator.Shared;
 
         public PlanSubscriptionRow(AnswerSource plan, SettingsItem item, string query, MainWindowServices services)
         {
@@ -172,18 +175,39 @@ internal sealed partial class SettingsRowFactory
             Render();
             Loaded += async (_, _) =>
             {
-                try { status = await services.Services.PlanStatusAsync(plan); }
-                catch (Exception error) { AppLog.Write($"plans: status failed: {error.Message}"); status = PlanCliStatus.NotInstalled; }
-                Render();
+                signIn.Changed += OnSignInChanged;
+                await ReloadStatusAsync();
             };
+            Unloaded += (_, _) => signIn.Changed -= OnSignInChanged;
         }
+
+        private async Task ReloadStatusAsync()
+        {
+            try { status = await services.Services.PlanStatusAsync(plan); }
+            catch (Exception error) { AppLog.Write($"plans: status failed: {error.Message}"); status = PlanCliStatus.NotInstalled; }
+            Render();
+        }
+
+        /// <summary>A login started or ended, on a background thread; one that ended can have switched the plan on.</summary>
+        private void OnSignInChanged() => Dispatcher.BeginInvoke(async () =>
+        {
+            Render();
+            if (signIn.IsRunning(plan)) return;
+            ShellSettingsRevision.NoteChanged();
+            await ReloadStatusAsync();
+        });
 
         private void Render()
         {
             var isOn = PlanSubscription.IsOn(plan, OpenClickyConfiguration.Settings);
-            var detail = checkSentence ?? PlanSubscription.Detail(plan, status, isOn);
+            var isSigningIn = signIn.IsRunning(plan);
+            var signInFailure = status == PlanCliStatus.Ready ? null : signIn.FailureSentence(plan);
+            var detail = isSigningIn ? "Finish signing in in your browser…" : signInFailure ?? checkSentence ?? PlanSubscription.Detail(plan, status, isOn);
             var controls = Ui.HStack(8,
                 status == PlanCliStatus.Ready ? Ui.Button(isChecking ? "Testing…" : "Test", Test, isEnabled: !isChecking, toolTip: "Ask it what colour a red square is") : null,
+                isSigningIn ? Ui.Button("Cancel", () => signIn.Cancel(plan))
+                    : status == PlanCliStatus.InstalledSignedOut ? Ui.Button("Sign In", () => { checkSentence = null; signIn.Start(plan); }, toolTip: $"Opens your browser to sign in to {plan.ShortName()}")
+                    : null,
                 status == PlanCliStatus.NotInstalled ? Ui.Button("Get It ↗", () => Ui.OpenExternal(PlanSubscription.GetItUrl(plan))) : null,
                 Ui.Toggle(isOn, newValue =>
                 {

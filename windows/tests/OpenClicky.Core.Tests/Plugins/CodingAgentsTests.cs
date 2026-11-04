@@ -1,10 +1,11 @@
-// Ports AgentSessionsTests.swift and ClaudeUsageTests.swift: what a coding agent's own session log says it is
-// doing, when a session counts as live, the watcher that lists them, and Claude's plan limits (the reply, how a
-// reset reads, and the store's states). Logs are fixture strings written to a temporary folder.
+// Ports AgentSessionsTests.swift and ClaudeLimitRingsTests.swift: what a coding agent's own session log says it is
+// doing, when a session counts as live, the watcher that lists them, and Claude's limit rings (what the CLI reported,
+// how a reset reads). Logs are fixture strings written to a temporary folder.
 
 using System.Text.Json.Nodes;
 using OpenClicky.Core.Companion;
 using OpenClicky.Core.Plugins.CodingAgents;
+using OpenClicky.Core.Providers;
 
 namespace OpenClicky.Core.Tests.Plugins;
 
@@ -197,82 +198,45 @@ public class CodingAgentsTests
 
     // MARK: - Plan limits
 
-    private const string Reply = """{"five_hour":{"utilization":38.0,"resets_at":"2026-10-21T15:00:00.000000+00:00"},"seven_day":{"utilization":37.0,"resets_at":"2026-10-25T09:00:00+00:00"},"extra_usage":{}}""";
+    private static readonly DateTimeOffset RingsNow = new(2027, 1, 15, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
-    public void TheReplyBecomesTwoWindows()
+    public void TheReportedWindowsBecomeTwoRingsInOrder()
     {
-        var usage = ClaudeUsage.Parse(Reply);
-        Assert.NotNull(usage);
-        Assert.Equal(0.38, usage.FiveHour.Fraction, 6);
-        Assert.Equal(0.37, usage.SevenDay.Fraction, 6);
-        Assert.Equal(DateTimeOffset.Parse("2026-10-21T15:00:00Z"), usage.FiveHour.ResetsAt);
-        Assert.Null(ClaudeUsage.Parse("{}"));
+        var snapshot = new PlanLimitSnapshot
+        {
+            Windows =
+            [
+                new PlanLimitWindow("7 days", 0.37, RingsNow.AddDays(1)),
+                new PlanLimitWindow("5 hours", 0.38, RingsNow.AddHours(1)),
+                new PlanLimitWindow("seven day opus", 0.9, null),
+            ],
+        };
+        var rings = ClaudeLimitRings.Rings(snapshot, RingsNow);
+        Assert.Equal(new ClaudeLimitRing("5 h", 0.38, RingsNow.AddHours(1)), rings[0]);
+        Assert.Equal(new ClaudeLimitRing("7 d", 0.37, RingsNow.AddDays(1)), rings[1]);
+        Assert.Equal(2, rings.Count);
     }
 
     [Fact]
-    public void ResetsReadShortAndTheSignInIsReadAtMostEveryHalfHour()
+    public void AWindowThatHasResetIsLeftOut()
     {
-        var now = DateTimeOffset.Now;
-        Assert.Equal("resets 2 h 10 m", ClaudeUsagePolicy.ResetText(now.AddSeconds(2 * 3600 + 10 * 60 + 5), now));
-        Assert.Equal("resets 35 m", ClaudeUsagePolicy.ResetText(now.AddSeconds(35 * 60), now));
-        Assert.Equal("resets soon", ClaudeUsagePolicy.ResetText(now.AddSeconds(30), now));
-        Assert.Equal("", ClaudeUsagePolicy.ResetText(null, now));
-        Assert.True(ClaudeUsagePolicy.ShouldReadCredentials(null, now));
-        Assert.False(ClaudeUsagePolicy.ShouldReadCredentials(now.AddSeconds(-1799), now));
-        Assert.True(ClaudeUsagePolicy.ShouldReadCredentials(now.AddSeconds(-1801), now));
+        var snapshot = new PlanLimitSnapshot
+        {
+            Windows = [new PlanLimitWindow("5 hours", 0.9, RingsNow.AddSeconds(-1)), new PlanLimitWindow("7 days", 0.2, null)],
+        };
+        Assert.Equal("7 d", Assert.Single(ClaudeLimitRings.Rings(snapshot, RingsNow)).Label);
     }
 
     [Fact]
-    public void TheCredentialsFileGivesItsAccessTokenOnly()
-    {
-        var token = FileClaudeCredentialReader.TokenFrom("""{"claudeAiOauth":{"accessToken":"tok","refreshToken":"r","expiresAt":1}}""");
-        Assert.Equal(new ClaudeCredentialResult.Token("tok"), token);
-        Assert.IsType<ClaudeCredentialResult.Missing>(FileClaudeCredentialReader.TokenFrom("""{"claudeAiOauth":{}}"""));
-        Assert.IsType<ClaudeCredentialResult.Missing>(FileClaudeCredentialReader.TokenFrom("not json"));
-        Assert.IsType<ClaudeCredentialResult.Missing>(new FileClaudeCredentialReader(Path.Combine(Path.GetTempPath(), $"none-{Guid.NewGuid():N}.json")).ReadAccessToken());
-    }
-
-    private sealed class Reader : IClaudeCredentialReader
-    {
-        public ClaudeCredentialResult Result = new ClaudeCredentialResult.Missing();
-        public int Reads;
-        public ClaudeCredentialResult ReadAccessToken() { Reads++; return Result; }
-    }
+    public void NothingReportedYetIsNoRings() => Assert.Empty(ClaudeLimitRings.Rings(null, RingsNow));
 
     [Fact]
-    public async Task TheStoreTellsSignInFromARefusedFileFromStaleFigures()
+    public void ResetsReadShort()
     {
-        var reader = new Reader();
-        (string, int)? reply = (Reply, 200);
-        var store = new ClaudeUsageStore(reader, (_, _) => Task.FromResult(reply));
-        store.SetEnabled(true);
-        await store.RefreshNowAsync();
-        Assert.IsType<ClaudeUsageState.SignInNeeded>(store.State);
-        await store.RefreshNowAsync();
-        Assert.Equal(1, reader.Reads);            // no token is no reason to read the file again within 30 min
-        store.SetEnabled(false);
-        store.SetEnabled(true);
-        reader.Result = new ClaudeCredentialResult.Refused();
-        await store.RefreshNowAsync();
-        Assert.IsType<ClaudeUsageState.CredentialsRefused>(store.State);
-        await store.RefreshNowAsync();
-        Assert.Equal(2, reader.Reads);            // a refusal is remembered
-        store.SetEnabled(false);
-        store.SetEnabled(true);
-        reader.Result = new ClaudeCredentialResult.Token("t");
-        await store.RefreshNowAsync();
-        var figures = Assert.IsType<ClaudeUsageState.Figures>(store.State);
-        Assert.False(figures.IsStale);
-        Assert.Equal(0.38, figures.Usage.FiveHour.Fraction, 6);
-        reply = (Reply, 500);
-        await store.RefreshNowAsync();
-        Assert.Equal(new ClaudeUsageState.Figures(figures.Usage, IsStale: true), store.State);
-        reply = null;                             // the network failed
-        await store.RefreshNowAsync();
-        Assert.Equal(new ClaudeUsageState.Figures(figures.Usage, IsStale: true), store.State);
-        reply = (Reply, 401);
-        await store.RefreshNowAsync();
-        Assert.IsType<ClaudeUsageState.SignInNeeded>(store.State);
+        Assert.Equal("resets 2 h 10 m", ClaudeLimitRings.ResetText(RingsNow.AddSeconds(2 * 3600 + 10 * 60 + 5), RingsNow));
+        Assert.Equal("resets 35 m", ClaudeLimitRings.ResetText(RingsNow.AddSeconds(35 * 60), RingsNow));
+        Assert.Equal("resets soon", ClaudeLimitRings.ResetText(RingsNow.AddSeconds(30), RingsNow));
+        Assert.Equal("", ClaudeLimitRings.ResetText(null, RingsNow));
     }
 }

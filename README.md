@@ -14,6 +14,8 @@ of its own: it talks only to the services you connect. API keys still work if yo
 
 It shares no accounts or servers with the original project and takes no updates from it.
 
+> **Using your Claude plan here is at your own risk.** See [Claude plan warning](#claude-plan-warning).
+
 ## What needs the internet
 
 | Works on your machine | Needs the internet |
@@ -57,12 +59,38 @@ Later updates install themselves.
 
 ## Connect your plans
 
-Sign in once in a terminal. OpenClicky finds what is signed in when it starts.
+Install the tool for each plan you have:
 
 ```bash
-npm i -g @openai/codex && codex login     # your ChatGPT plan
-claude                                    # your Claude plan: install Claude Code, then sign in
+npm i -g @openai/codex     # your ChatGPT plan
 ```
+
+For your Claude plan, [install Claude Code](https://claude.com/product/claude-code).
+
+Then open **Settings → Keys & Plans** and press **Sign In** next to the plan. Your browser opens, and the
+plan switches on once you've signed in. OpenClicky never sees your password or login: the tool keeps them.
+If you'd rather use a terminal, `codex login` and `claude auth login` do the same thing. OpenClicky switches
+Codex on by itself if it's already signed in. Claude stays off until you switch it on, even if Claude Code is
+signed in.
+
+### Claude plan warning
+
+OpenClicky is an independent project, not made or approved by Anthropic. It uses your Claude plan by
+running the official Claude Code tool on your computer. [Anthropic's terms](https://code.claude.com/docs/en/legal-and-compliance)
+limit using subscription logins with other apps, and Anthropic can restrict or ban accounts without notice.
+It isn't clear whether OpenClicky's use is allowed.
+
+**You choose whether to use your Claude plan with OpenClicky, and you accept that risk.** OpenClicky is
+provided as is, under the [MIT License](LICENSE), and its authors and contributors accept no responsibility
+for a restricted, suspended or banned account, or for lost access or subscription fees. To avoid this risk,
+don't connect your Claude plan: an Anthropic API key is the route Anthropic supports for other apps, and it's
+billed separately.
+
+### Gemini
+
+Gemini works with an API key, not a subscription. Google closed Gemini CLI to personal AI Pro and Ultra
+plans in June 2026, and the terms of its replacement, Antigravity CLI, bar third-party apps from using
+those logins. **Add a key → Google Gemini → Get a Key** opens the page to make one.
 
 In Settings:
 

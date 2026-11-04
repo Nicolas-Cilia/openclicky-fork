@@ -558,20 +558,16 @@ public static class PlanLimitText
     public static bool Matches(string text) => Phrases.Any(phrase => text.Contains(phrase, StringComparison.OrdinalIgnoreCase));
 }
 
-/// <summary>Switches on a plan that is already signed in, once: a plan someone switched off stays off.</summary>
+/// <summary>Switches on Codex if it is already signed in, once: a plan someone switched off stays off.</summary>
 public static class PlanAutoLink
 {
     public static async Task RunAsync()
     {
-        var settings = OpenClickyConfiguration.Settings;
-        var claudeReady = settings.UseClaudeCodePlan is null && await PlanCLIs.ClaudeCodeStatusAsync().ConfigureAwait(false) == PlanCliStatus.Ready;
-        var codexReady = settings.UseCodexPlan is null && await PlanCLIs.CodexStatusAsync().ConfigureAwait(false) == PlanCliStatus.Ready;
-        if (!claudeReady && !codexReady) return;
-        OpenClickyConfiguration.Update(shell =>
-        {
-            if (claudeReady) shell.UseClaudeCodePlan = true;
-            if (codexReady) shell.UseCodexPlan = true;
-        });
-        AppLog.Write($"plans: linked what is already signed in (claude {claudeReady}, codex {codexReady})");
+        // Claude is never switched on here: using a Claude plan with OpenClicky is at the person's own
+        // risk (README, Claude plan warning), so it waits for them to press Sign In or flip its switch.
+        if (OpenClickyConfiguration.Settings.UseCodexPlan is not null) return;
+        if (await PlanCLIs.CodexStatusAsync().ConfigureAwait(false) != PlanCliStatus.Ready) return;
+        OpenClickyConfiguration.Update(shell => shell.UseCodexPlan = true);
+        AppLog.Write("plans: linked codex, already signed in");
     }
 }

@@ -28,12 +28,12 @@ extension SettingsCatalog {
             SettingsItem(
                 id: "keys.claudeCodePlan",
                 title: "Claude Code (your Claude plan)", detail: "Answer questions through Claude Code, signed in to your Claude plan.",
-                keywords: ["claude code", "claude plan", "pro", "max", "subscription", "anthropic"],
+                keywords: ["claude code", "claude plan", "pro", "max", "subscription", "anthropic", "sign in", "login", "browser"],
                 view: AnyView(PlanSubscriptionRow(plan: .claudeCodePlan))),
             SettingsItem(
                 id: "keys.codexPlan",
                 title: "Codex (your ChatGPT plan)", detail: "Answer questions and run agent tasks through Codex, signed in with ChatGPT.",
-                keywords: ["codex", "chatgpt", "plus", "pro", "subscription", "openai"],
+                keywords: ["codex", "chatgpt", "plus", "pro", "subscription", "openai", "sign in", "login", "browser"],
                 view: AnyView(PlanSubscriptionRow(plan: .codexPlan))),
             SettingsItem(
                 id: "keys.usage.claudeCodePlan",
@@ -48,9 +48,9 @@ extension SettingsCatalog {
             SettingsItem(
                 id: "keys.plansNote",
                 title: "What a plan can do", detail: "A plan answers, points and does quick actions like opening apps; Codex also runs bigger tasks.",
-                keywords: ["subscription", "plan"],
+                keywords: ["subscription", "plan", "risk", "ban", "terms", "anthropic"],
                 chrome: .footer,
-                view: AnyView(SettingsFootnote(text: "A plan answers questions, points, and does quick actions like opening apps or making folders. Bigger tasks run on Codex, so switch it on for those. Codex answers in one go, a few seconds after you ask."))),
+                view: AnyView(SettingsFootnote(text: "A plan answers questions, points, and does quick actions like opening apps or making folders. Bigger tasks run on Codex, so switch it on for those. Codex answers in one go, a few seconds after you ask.\n\nUsing your Claude plan here is at your own risk. OpenClicky is an independent project, not made or approved by Anthropic. Anthropic’s terms limit using subscription logins with other apps, and it can restrict or ban accounts without notice. OpenClicky’s authors aren’t responsible if that happens. An Anthropic API key is the route Anthropic supports for other apps."))),
         ]
     }
 }
@@ -86,7 +86,7 @@ enum KeyProvider: String, CaseIterable, Identifiable {
         case .openAI: return "Answers, fast voice and hands-free."
         case .anthropic: return "Claude answers your questions about the screen."
         case .openRouter: return "One key for Claude, GPT, Gemini, Llama and more."
-        case .gemini: return "Answers and a voice. From Google AI Studio."
+        case .gemini: return "Answers and a voice. An AI Studio key, separate from any AI Pro or Ultra plan."
         case .groq: return "Very fast answers on open models."
         case .mistral: return "Mistral’s own models."
         case .xai: return "Grok, from xAI."
@@ -113,6 +113,12 @@ enum KeyProvider: String, CaseIterable, Identifiable {
         case .amazonPolly: return "AKIA…:secret"
         case .spotify: return "id:secret"
         }
+    }
+
+    /// Where to get a key, for the provider with no sign-in to offer instead: Google closed Gemini CLI
+    /// to personal plans on 2026-06-18, and its replacement's terms bar third-party apps.
+    var keyPageURL: String? {
+        self == .gemini ? "https://aistudio.google.com/apikey" : nil
     }
 
     var keyPath: WritableKeyPath<OpenClickyShellSettings, String?> {
@@ -231,6 +237,11 @@ private struct ProviderKeysList: View {
                     .frame(width: 130)
                     .onSubmit(add)
                     .accessibilityLabel("\(newProvider.title) key")
+                if let keyPageURL = newProvider.keyPageURL {
+                    Button("Get a Key ↗") { openExternalLink(keyPageURL) }
+                        .fixedSize()
+                        .pointerCursor()
+                }
                 Button("Add", action: add)
                     .fixedSize()
                     .disabled(newKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -307,6 +318,7 @@ private struct PlanSubscriptionRow: View {
     @State private var isOn = false
     @State private var checkSentence: String?
     @State private var isChecking = false
+    @ObservedObject private var signIn = PlanSignIn.shared
 
     private var title: String { plan.displayName }
 
@@ -318,6 +330,17 @@ private struct PlanSubscriptionRow: View {
                         .disabled(isChecking)
                         .help("Ask it what colour a red square is")
                         .pointerCursor(isEnabled: !isChecking)
+                }
+                if signIn.isRunning(plan) {
+                    Button("Cancel") { signIn.cancel(plan) }
+                        .pointerCursor()
+                } else if status == .installedSignedOut {
+                    Button("Sign In") {
+                        checkSentence = nil
+                        signIn.start(plan)
+                    }
+                    .help("Opens your browser to sign in to \(plan.shortName)")
+                    .pointerCursor()
                 }
                 if status == .notInstalled {
                     Button("Get It ↗") { openExternalLink(plan == .claudeCodePlan ? "https://claude.com/product/claude-code" : "https://developers.openai.com/codex/cli") }
@@ -333,7 +356,8 @@ private struct PlanSubscriptionRow: View {
                 .disabled(status != .ready && !isOn)
             }
         }
-        .task {
+        // Runs again when a sign-in ends, which can have switched the plan on as well.
+        .task(id: signIn.finishedCount(plan)) {
             isOn = plan == .claudeCodePlan ? OpenClickyConfiguration.settings.useClaudeCodePlan == true : OpenClickyConfiguration.settings.useCodexPlan == true
             status = plan == .claudeCodePlan ? await PlanCLIs.claudeCodeStatus() : await PlanCLIs.codexStatus()
         }
@@ -350,12 +374,13 @@ private struct PlanSubscriptionRow: View {
     }
 
     private var detail: String {
+        if signIn.isRunning(plan) { return "Finish signing in in your browser…" }
+        if status != .ready, let failure = signIn.failureSentence(plan) { return failure }
         if let checkSentence { return checkSentence }
-        let command = plan == .claudeCodePlan ? "claude" : "codex login"
         switch status {
         case .none: return "Checking…"
         case .notInstalled?: return plan == .claudeCodePlan ? "Claude Code isn’t installed on this Mac." : "Codex isn’t installed on this Mac."
-        case .installedSignedOut?: return "Installed, not signed in. Run “\(command)” in Terminal and sign in."
+        case .installedSignedOut?: return "Installed, not signed in. Press Sign In, or run “\(PlanCLIs.signInCommand(for: plan))” in Terminal."
         case .ready?: return isOn ? "Signed in. Answering with your plan when it’s the one picked (Settings → Clicky)." : "Signed in. Switch on to answer with your plan."
         }
     }

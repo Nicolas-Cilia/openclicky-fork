@@ -508,7 +508,7 @@ public sealed partial class CompanionManager : ObservableObject, ICompanionSetti
 
     private void OnSettingsFileUnreadable(string sentence) => services.MainThread.Post(() => ShowQuietNotice(sentence));
 
-    /// <summary>A plan already signed in on this PC starts linked; a failure only means it stays off.</summary>
+    /// <summary>Codex already signed in on this PC starts linked; a failure only means it stays off.</summary>
     private static async Task LinkSignedInPlansAsync()
     {
         try { await PlanAutoLink.RunAsync().ConfigureAwait(false); }
