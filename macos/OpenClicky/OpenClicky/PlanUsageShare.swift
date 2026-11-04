@@ -5,7 +5,9 @@
 //  Roughly how much of a plan's limit bar is OpenClicky. Neither plan says, so this is an estimate:
 //    - Claude: OpenClicky's tokens against the tokens Claude Code logged on this computer
 //      (~/.claude/projects; only the counts are read), as a share of the bar. Use on other
-//      computers or on the Claude website isn't in those logs, so the share can come out high.
+//      computers or on the Claude website isn't in those logs, so the share can come out high. It
+//      never exceeds how far the bar has risen since OpenClicky first used this window, so what was
+//      already on the bar is never counted as OpenClicky's.
 //    - Codex: how far the bar moved across each OpenClicky request, added up until the window
 //      resets. Anything else using Codex at that moment is counted too.
 //
@@ -59,14 +61,26 @@ nonisolated enum PlanUsageShare {
     // MARK: Claude
 
     /// OpenClicky's part of a Claude bar; nil when it isn't known or OpenClicky used none of this window.
-    static func claudeFraction(of window: PlanLimitWindow, samples: [PlanUsageSample], localUsage: [LocalClaudeUsage]) -> Double? {
-        guard let start = start(of: window) else { return nil }
+    /// `baselines` is how full each bar was when OpenClicky first used its window (`updatingBaselines`).
+    static func claudeFraction(of window: PlanLimitWindow, samples: [PlanUsageSample], localUsage: [LocalClaudeUsage],
+                               baselines: [MeasuredPlanWindow]) -> Double? {
+        guard let start = start(of: window),
+              let baseline = baselines.first(where: { $0.title == window.title && isSameWindow($0.resetsAt, window.resetsAt) }) else { return nil }
         let ours = samples
             .filter { $0.source == AnswerSource.claudeCodePlan.rawValue && $0.date >= start }
             .reduce(0) { $0 + weight(of: $1) }
         guard ours > 0 else { return nil }
         let others = localUsage.filter { $0.date >= start }.reduce(0) { $0 + $1.weight }
-        return window.usedFraction * ours / (ours + others)
+        return min(window.usedFraction * ours / (ours + others), max(0, window.usedFraction - baseline.usedFraction))
+    }
+
+    /// Remembers how full each bar is the first time it is seen in its window. Claude only reports
+    /// its limits on OpenClicky's own requests, so that is when OpenClicky first used the window.
+    static func updatingBaselines(_ baselines: [MeasuredPlanWindow], with snapshot: PlanLimitSnapshot) -> [MeasuredPlanWindow] {
+        snapshot.windows.map { window in
+            baselines.first { $0.title == window.title && isSameWindow($0.resetsAt, window.resetsAt) }
+                ?? MeasuredPlanWindow(title: window.title, resetsAt: window.resetsAt, usedFraction: window.usedFraction)
+        }
     }
 
     /// One request Claude Code logged on this computer.

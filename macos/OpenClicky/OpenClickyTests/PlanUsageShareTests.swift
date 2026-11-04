@@ -36,19 +36,66 @@ struct PlanUsageShareTests {
     @Test func claudesShareIsOursAgainstWhatThisComputerLogged() {
         // Window: started 4 hours ago, 20% full. We sent 1000, the terminal 3000.
         let local = [PlanUsageShare.LocalClaudeUsage(date: now.addingTimeInterval(-60), weight: 3000)]
-        let share = PlanUsageShare.claudeFraction(of: window(used: 0.2), samples: [sample()], localUsage: local)
+        let share = PlanUsageShare.claudeFraction(of: window(used: 0.2), samples: [sample()], localUsage: local, baselines: empty(0.2))
         #expect(abs((share ?? 0) - 0.05) < 0.0001)
     }
 
     @Test func claudesShareOnlyCountsThisWindowAndThisPlan() {
         let old = sample(ago: 5 * 3600)
         let codex = sample(.codexPlan)
-        #expect(PlanUsageShare.claudeFraction(of: window(used: 0.2), samples: [old, codex], localUsage: []) == nil)
+        #expect(PlanUsageShare.claudeFraction(of: window(used: 0.2), samples: [old, codex], localUsage: [], baselines: empty(0.2)) == nil)
         // A window it can't date shows no share rather than a wrong one.
-        #expect(PlanUsageShare.claudeFraction(of: window("seven day opus", used: 0.2), samples: [sample()], localUsage: []) == nil)
+        #expect(PlanUsageShare.claudeFraction(of: window("seven day opus", used: 0.2), samples: [sample()], localUsage: [], baselines: empty(0.2)) == nil)
 
         let oldLocal = PlanUsageShare.LocalClaudeUsage(date: now.addingTimeInterval(-5 * 3600), weight: 9999)
-        #expect(PlanUsageShare.claudeFraction(of: window(used: 0.2), samples: [sample()], localUsage: [oldLocal]) == 0.2)
+        #expect(PlanUsageShare.claudeFraction(of: window(used: 0.2), samples: [sample()], localUsage: [oldLocal], baselines: empty(0.2)) == 0.2)
+    }
+
+    /// A bar that was empty when OpenClicky first used it, so only the logs limit the share.
+    private func empty(_ used: Double) -> [MeasuredPlanWindow] {
+        [MeasuredPlanWindow(title: "5 hours", resetsAt: window(used: used).resetsAt, usedFraction: 0)]
+    }
+
+    @Test func whatWasOnTheBarBeforeOpenClickyIsNeverItsShare() {
+        // A fresh install: 8% used elsewhere, no logs on this computer, and one test request.
+        let snapshot = PlanLimitSnapshot(windows: [window(used: 0.08)])
+        let baselines = PlanUsageShare.updatingBaselines([], with: snapshot)
+        #expect(PlanUsageShare.claudeFraction(of: window(used: 0.08), samples: [sample()], localUsage: [], baselines: baselines) == 0)
+        #expect(PlanUsageShare.label(forFraction: 0) == "under 1% OpenClicky")
+
+        // The bar rises to 11%: at most that 3 points can be OpenClicky's.
+        let share = PlanUsageShare.claudeFraction(of: window(used: 0.11), samples: [sample()], localUsage: [], baselines: baselines)
+        #expect(abs((share ?? 0) - 0.03) < 0.0001)
+    }
+
+    @Test func theLogsStillLimitTheShareOnceTheBarHasRisen() {
+        let baselines = PlanUsageShare.updatingBaselines([], with: PlanLimitSnapshot(windows: [window(used: 0.10)]))
+        let local = [PlanUsageShare.LocalClaudeUsage(date: now.addingTimeInterval(-60), weight: 3000)]
+        let share = PlanUsageShare.claudeFraction(of: window(used: 0.20), samples: [sample()], localUsage: local, baselines: baselines)
+        #expect(abs((share ?? 0) - 0.05) < 0.0001)
+    }
+
+    @Test func aBarWithNoBaselineShowsNoShareRatherThanAWrongOne() {
+        #expect(PlanUsageShare.claudeFraction(of: window(used: 0.2), samples: [sample()], localUsage: [], baselines: []) == nil)
+    }
+
+    @Test func aBaselineLastsItsWindowAndANewWindowGetsItsOwn() {
+        let first = PlanUsageShare.updatingBaselines([], with: PlanLimitSnapshot(windows: [window(used: 0.08)]))
+        let later = PlanUsageShare.updatingBaselines(first, with: PlanLimitSnapshot(windows: [window(used: 0.30)]))
+        #expect(later.first?.usedFraction == 0.08)
+        let reset = PlanUsageShare.updatingBaselines(later, with: PlanLimitSnapshot(windows: [window(used: 0.01, resetsIn: 18_000)]))
+        #expect(reset.first?.usedFraction == 0.01)
+    }
+
+    @MainActor @Test func theStoreKeepsClaudesBaselinesAcrossLaunches() {
+        let defaults = UserDefaults(suiteName: "PlanUsageShareTests-\(UUID())")!
+        let store = PlanLimitStore(defaults: defaults, availability: PlanAvailability(defaults: defaults), readCodex: { nil })
+        store.ingest(PlanLimitSnapshot(windows: [window(used: 0.08)]), for: .claudeCodePlan)
+        store.ingest(PlanLimitSnapshot(windows: [window(used: 0.09)]), for: .claudeCodePlan)
+        store.ingest(PlanLimitSnapshot(windows: [window(used: 0.50)]), for: .codexPlan)
+        #expect(store.claudeBaselines.map(\.usedFraction) == [0.08])
+        let reopened = PlanLimitStore(defaults: defaults, availability: PlanAvailability(defaults: defaults), readCodex: { nil })
+        #expect(reopened.claudeBaselines == store.claudeBaselines)
     }
 
     @Test func claudesLogsKeepTheLastLineOfEachRequestAndOnlyCounts() throws {

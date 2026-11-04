@@ -310,6 +310,7 @@ public sealed class PlanLimitStore
 
     private const string PreferencesKey = "openclicky.plans.limits";
     private const string MeasuredKey = "openclicky.plans.codexMeasured";
+    private const string ClaudeBaselinesKey = "openclicky.plans.claudeBaselines";
     private static readonly TimeSpan CodexRefreshInterval = TimeSpan.FromSeconds(60);
 
     /// <summary>Codex can take a moment to count a finished request against its limits.</summary>
@@ -321,6 +322,7 @@ public sealed class PlanLimitStore
     private readonly Dictionary<AnswerSource, PlanLimitSnapshot> snapshots = [];
     private DateTimeOffset? lastCodexRead;
     private IReadOnlyList<MeasuredPlanWindow> codexMeasured = [];
+    private IReadOnlyList<MeasuredPlanWindow> claudeBaselines = [];
 
     public PlanAvailability Availability { get; }
 
@@ -352,6 +354,20 @@ public sealed class PlanLimitStore
             }
         }
         catch (JsonException) { }
+        try
+        {
+            if (preferences.GetString(ClaudeBaselinesKey) is { } json && JsonSerializer.Deserialize<List<MeasuredPlanWindow>>(json) is { } baselines)
+            {
+                claudeBaselines = baselines;
+            }
+        }
+        catch (JsonException) { }
+    }
+
+    /// <summary>How full Claude's bars were when OpenClicky first used each window (PlanUsageShare).</summary>
+    public IReadOnlyList<MeasuredPlanWindow> ClaudeBaselines
+    {
+        get { lock (stateLock) return claudeBaselines; }
     }
 
     /// <summary>How far Codex's limits moved across OpenClicky's requests (PlanUsageShare).</summary>
@@ -404,11 +420,18 @@ public sealed class PlanLimitStore
     public void Ingest(PlanLimitSnapshot snapshot, AnswerSource source)
     {
         string saved;
+        string? savedBaselines = null;
         lock (stateLock)
         {
             snapshots[source] = snapshot;
             saved = JsonSerializer.Serialize(snapshots.ToDictionary(entry => entry.Key.Id(), entry => entry.Value));
+            if (source == AnswerSource.ClaudeCodePlan)
+            {
+                claudeBaselines = PlanUsageShare.UpdatingBaselines(claudeBaselines, snapshot);
+                savedBaselines = JsonSerializer.Serialize(claudeBaselines);
+            }
         }
+        if (savedBaselines is not null) preferences.Set(ClaudeBaselinesKey, savedBaselines);
         if (snapshot.IsExhausted) Availability.MarkExhausted(source, snapshot.ExhaustedUntil);
         else Availability.Clear(source);
         preferences.Set(PreferencesKey, saved);

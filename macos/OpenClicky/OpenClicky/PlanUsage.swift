@@ -225,6 +225,7 @@ final class PlanLimitStore: ObservableObject {
     static let shared = PlanLimitStore(defaults: .standard, availability: .shared)
     private static let defaultsKey = "openclicky.plans.limits"
     private static let measuredKey = "openclicky.plans.codexMeasured"
+    private static let claudeBaselinesKey = "openclicky.plans.claudeBaselines"
     private static let codexRefreshInterval: TimeInterval = 60
     /// Codex can take a moment to count a finished request against its limits.
     nonisolated static let codexSettleNanoseconds: UInt64 = 5_000_000_000
@@ -232,6 +233,8 @@ final class PlanLimitStore: ObservableObject {
     @Published private(set) var snapshots: [AnswerSource: PlanLimitSnapshot] = [:]
     /// How far Codex's limits moved across OpenClicky's requests (PlanUsageShare).
     @Published private(set) var codexMeasured: [MeasuredPlanWindow] = []
+    /// How full Claude's bars were when OpenClicky first used each window (PlanUsageShare).
+    @Published private(set) var claudeBaselines: [MeasuredPlanWindow] = []
 
     private let defaults: UserDefaults
     private let availability: PlanAvailability
@@ -250,6 +253,10 @@ final class PlanLimitStore: ObservableObject {
         if let data = defaults.data(forKey: Self.measuredKey),
            let saved = try? JSONDecoder().decode([MeasuredPlanWindow].self, from: data) {
             codexMeasured = saved
+        }
+        if let data = defaults.data(forKey: Self.claudeBaselinesKey),
+           let saved = try? JSONDecoder().decode([MeasuredPlanWindow].self, from: data) {
+            claudeBaselines = saved
         }
     }
 
@@ -276,6 +283,10 @@ final class PlanLimitStore: ObservableObject {
 
     func ingest(_ snapshot: PlanLimitSnapshot, for source: AnswerSource) {
         snapshots[source] = snapshot
+        if source == .claudeCodePlan {
+            claudeBaselines = PlanUsageShare.updatingBaselines(claudeBaselines, with: snapshot)
+            if let data = try? JSONEncoder().encode(claudeBaselines) { defaults.set(data, forKey: Self.claudeBaselinesKey) }
+        }
         if snapshot.isExhausted {
             availability.markExhausted(source, until: snapshot.exhaustedUntil)
         } else {
