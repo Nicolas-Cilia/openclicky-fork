@@ -223,6 +223,7 @@ DMG_STAGING="$EXPORT_DIR/dmg"
 mkdir -p "$DMG_STAGING"
 cp -R "$APP_PATH" "$DMG_STAGING/"
 ln -s /Applications "$DMG_STAGING/Applications"
+[[ $SELF_MANAGED_SIGNING -eq 1 ]] && cp "$SCRIPT_DIR/How to open OpenClicky.txt" "$DMG_STAGING/"
 # LZMA (ULMO, macOS 10.15+): with Kokoro's engine inside, 24.6 MB against 35.6 MB as UDZO.
 hdiutil create -quiet -volname "$APP_NAME $VERSION" -srcfolder "$DMG_STAGING" -ov -format ULMO "$DMG_PATH"
 rm -rf "$DMG_STAGING"
@@ -298,7 +299,7 @@ if [[ $PUBLISH -eq 1 ]]; then
   # windows-release workflow rebuilds the page when it attaches its files.
   NOTES_FILE="$EXPORT_DIR/notes.md"
   if [[ $SELF_MANAGED_SIGNING -eq 1 ]]; then
-    MAC_SIGNING="development"
+    MAC_SIGNING="self-signed"
   elif [[ -n "$NOTARY_PROFILE" ]]; then
     MAC_SIGNING="notarized"
   else
@@ -309,7 +310,7 @@ if [[ $PUBLISH -eq 1 ]]; then
   # is always the newest build (the README's download button).
   LATEST_DMG_PATH="$EXPORT_DIR/$APP_NAME.dmg"
   cp "$DMG_PATH" "$LATEST_DMG_PATH"
-  RELEASE_ASSETS=("$ZIP_PATH" "$DMG_PATH" "$LATEST_DMG_PATH")
+  RELEASE_ASSETS=("$ZIP_PATH" "$DMG_PATH" "$LATEST_DMG_PATH" "$REPO_DIR/scripts/install-mac.sh")
   [[ -n "$APPCAST_PATH" ]] && RELEASE_ASSETS+=("$APPCAST_PATH")
   if gh release view "$TAG" --repo "$GITHUB_REPO" >/dev/null 2>&1; then
     gh release upload "$TAG" "${RELEASE_ASSETS[@]}" --repo "$GITHUB_REPO" --clobber
