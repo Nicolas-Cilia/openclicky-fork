@@ -9,6 +9,23 @@ namespace OpenClicky.Core.Tests.Answers;
 public class SpokenChunkerTests
 {
     [Fact]
+    public void MarkdownIsNeverReadOut()
+    {
+        Assert.Equal("click Format, then Shape.", SpokenChunker.WithoutMarkdown("click **Format**, then *Shape*."));
+        Assert.Equal("Steps\nopen Insert\npick a shape", SpokenChunker.WithoutMarkdown("# Steps\n- open `Insert`\n* pick a shape"));
+        Assert.Equal("see the docs here", SpokenChunker.WithoutMarkdown("see [the docs](https://example.com) here"));
+        Assert.Equal("bold and gone", SpokenChunker.WithoutMarkdown("__bold__ and ~~gone~~"));
+    }
+
+    [Fact]
+    public void StarsThatMeanSomethingStay()
+    {
+        Assert.Equal("2 * 3 is 6, and 4*5 is 20", SpokenChunker.WithoutMarkdown("2 * 3 is 6, and 4*5 is 20"));
+        Assert.Equal("use my_file.txt", SpokenChunker.WithoutMarkdown("use my_file.txt"));
+        Assert.Equal("2 apples", SpokenChunker.WithoutMarkdown("**2** apples"));
+    }
+
+    [Fact]
     public void TheFirstSentenceIsReadyAsSoonAsItEnds()
     {
         var chunker = new SpokenChunker();

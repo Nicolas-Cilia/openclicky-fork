@@ -19,7 +19,7 @@
 //  or a model that ignores the instruction) is found when the stream finishes. The guide's [NEXT]
 //  marker (`GuidedStepMarker`) and the [UNSURE] marker (`UnsureMarker`) are never spoken either:
 //  they hold no sentence end, so they only ever arrive whole inside a piece, and are taken out of
-//  every piece. [UNSURE] opens its answer, so a tag after it still counts as leading (and is then
+//  every piece. Markdown is taken out too (`withoutMarkdown`). [UNSURE] opens its answer, so a tag after it still counts as leading (and is then
 //  ignored by whoever points: `isUnsure`).
 //
 
@@ -95,9 +95,26 @@ struct SpokenChunker {
 
     // MARK: - Private
 
-    /// The text without the guide's [NEXT] and without [UNSURE], trimmed.
+    /// The text without the guide's [NEXT], [UNSURE] or markdown, trimmed.
     private static func removingMarkers(from text: String) -> String {
-        UnsureMarker.removingMarkers(from: GuidedStepMarker.removingMarkers(from: text))
+        withoutMarkdown(UnsureMarker.removingMarkers(from: GuidedStepMarker.removingMarkers(from: text)))
+    }
+
+    /// Models write markdown even when told not to, and a voice reads "asterisk asterisk" out. A
+    /// lone * between numbers stays, as "2 * 3" means something; `_` stays, as snake_case does too.
+    static func withoutMarkdown(_ text: String) -> String {
+        var spoken = text
+        let replacements: [(pattern: String, template: String)] = [
+            (#"\[([^\]]+)\]\([^)]*\)"#, "$1"),
+            (#"(?m)^[ \t]*(?:#{1,6}|[-*+•]|>)[ \t]+"#, ""),
+            (#"\*\*|__|~~|`"#, ""),
+            (#"(?<![0-9]\s?)\*|\*(?!\s?[0-9])"#, ""),
+            (#"[ \t]{2,}"#, " "),
+        ]
+        for (pattern, template) in replacements {
+            spoken = spoken.replacingOccurrences(of: pattern, with: template, options: .regularExpression)
+        }
+        return spoken.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static let completeLeadingTagPattern = #"^\s*\[POINT:[^\]]*\]"#

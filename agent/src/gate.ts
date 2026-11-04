@@ -30,12 +30,22 @@ export function parseGateReply(text: string): { lane: Lane; reason: string } | u
   return undefined;
 }
 
-/** Local heuristic used when the gate model is unavailable. Errs toward the agent lane. */
+/** What people say before the request itself: "hey clicky, okay so…". */
+const SPOKEN_OPENING = /^(?:(?:hey|hi|hello|ok|okay|um+|uh+|so|well|yeah|right|alright|clicky|openclicky)\b[,.!\s]*)+/;
+/** Asking for the work: "please", "can you"… (but not "can I", which asks how). */
+const REQUEST_OPENING = /^(?:(?:please|can you|could you|would you|will you|i need you to|i want you to|go ahead and)\s+)+/;
+/** Starting with one of these, it is work to do rather than something to explain. */
+const WORK_VERB = /^(?:create|make|write|edit|fix|add|remove|delete|run|build|deploy|install|refactor|rename|move|research|commit|push|draft|generate|update|download|convert|organi[sz]e|set up|clean up|search the web)\b/;
+
+/**
+ * Local heuristic used when the gate model is unavailable, which is whenever someone is on their
+ * plans with no Anthropic key. Errs toward the ask lane: only it points, guides step by step and
+ * writes for the ear, and it can still do quick actions. So only a request that opens with the work
+ * goes to an agent. "how do I fix my repo" asks; "fix my repo" and "can you fix my repo" are work.
+ */
 export function heuristicLane(text: string): Lane {
-  const t = text.trim().toLowerCase();
-  const asksLike = /^(what|who|why|how|when|where|which|is|are|does|do you|can you tell|could you explain|should|explain|define|translate|summari[sz]e|tell me)\b/.test(t);
-  const workLike = /\b(create|make|write|edit|fix|add|remove|delete|run|build|deploy|install|refactor|rename|move|open|search the web|research|report|commit|push|file|repo|project|folder|script)\b/.test(t);
-  return asksLike && !workLike ? "ask" : "agent";
+  const request = text.trim().toLowerCase().replace(SPOKEN_OPENING, "").replace(REQUEST_OPENING, "");
+  return WORK_VERB.test(request) ? "agent" : "ask";
 }
 
 export async function gate(cfg: AgentConfig, text: string, opts: { fetchImpl?: typeof fetch } = {}): Promise<GateDecision> {
